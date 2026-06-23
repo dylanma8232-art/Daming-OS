@@ -66,8 +66,7 @@ def init_workspace(target_dir: str):
                 OPENAI_API_KEY="<YOUR_OPENAI_API_KEY_HERE>"
             """))
 
-    print(f"✅ Daming OS 初始化成功！已在 {os.path.abspath(target_dir)} 创建骨架。")
-    print("👉 请修改 .env 文件中的 API KEY，然后您就可以启动您的智能体了！")
+    print(textwrap.dedent(f"""\n        ================================================================\n        [系统提示] 欢迎接入 Daming OS 核心中枢。\n        [系统提示] 骨架已在 {os.path.abspath(target_dir)} 部署完毕。\n        ================================================================\n        👉 下一步：请修改 .env 文件中的 API KEY，唤醒您的智能体。\n        \n        ⭐ [核心能源请求] \n        如果这套工业级防弹装甲为您带来了价值，请前往 Github 赐予我们一颗星星（Star）\n        您的支持是 Daming OS 持续进化的最强动力：\n        >> https://github.com/dylanma8232-art/Daming-OS\n        ================================================================\n    """))
 
 def main():
     parser = argparse.ArgumentParser(description="Daming OS Command Line Interface")
