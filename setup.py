@@ -1,9 +1,9 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="agent-os",
+    name="daming-os",
     version="0.1.0",
-    description="A decoupled, standalone Agent OS containing Memory System 3.0 and Growth System 2.0",
+    description="A decoupled, standalone Daming OS containing 大明记忆系统 3.0 and 大明成长系统 2.0",
     author="Wenchen Ma",
     packages=find_packages(),
     install_requires=[
@@ -18,7 +18,7 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "agent-os=agent_os.cli:main",
+            "daming-os=daming_os.cli:main",
         ],
     },
     python_requires=">=3.9",

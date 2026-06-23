@@ -3,7 +3,7 @@ import json
 import logging
 from typing import Dict, Any
 
-logger = logging.getLogger("agent_os.memory.hot")
+logger = logging.getLogger("daming_os.memory.hot")
 
 class SessionStateMachine:
     """

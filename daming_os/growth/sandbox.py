@@ -9,7 +9,7 @@ import uuid
 from typing import Tuple, Optional
 from ..config import config
 
-logger = logging.getLogger("agent_os.growth.sandbox")
+logger = logging.getLogger("daming_os.growth.sandbox")
 
 class SafetyVisitor(ast.NodeVisitor):
     """AST NodeVisitor to explicitly block unsafe imports and functions."""

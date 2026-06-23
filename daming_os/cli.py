@@ -3,7 +3,7 @@ import argparse
 import textwrap
 
 def init_workspace(target_dir: str):
-    """Initialize a new Agent OS workspace with necessary directories and templates."""
+    """Initialize a new Daming OS workspace with necessary directories and templates."""
     os.makedirs(target_dir, exist_ok=True)
     
     # 1. Create Directories
@@ -11,7 +11,7 @@ def init_workspace(target_dir: str):
         "memory/lancedb",
         "memory/evolution-proposals",
         "wiki/main/concepts",
-        ".agent-os" # hidden meta directory
+        ".daming-os" # hidden meta directory
     ]
     for d in dirs:
         os.makedirs(os.path.join(target_dir, d), exist_ok=True)
@@ -53,7 +53,7 @@ def init_workspace(target_dir: str):
             f.write(textwrap.dedent("""\
                 # 运行状态 (Session Status)
                 - 当前系统状态：✅ 正常运行
-                - OS 引擎版本：Agent OS v0.1.0
+                - OS 引擎版本：Daming OS v0.1.0
             """))
 
     # 5. Generate .env template
@@ -61,19 +61,19 @@ def init_workspace(target_dir: str):
     if not os.path.exists(env_path):
         with open(env_path, "w", encoding="utf-8") as f:
             f.write(textwrap.dedent(f"""\
-                AGENT_OS_WORKSPACE="{os.path.abspath(target_dir)}"
+                DAMING_OS_WORKSPACE="{os.path.abspath(target_dir)}"
                 # 填入您使用的大模型 API KEY (支持 OpenAI, Anthropic, DashScope 等)
                 OPENAI_API_KEY="<YOUR_OPENAI_API_KEY_HERE>"
             """))
 
-    print(f"✅ Agent OS 初始化成功！已在 {os.path.abspath(target_dir)} 创建骨架。")
+    print(f"✅ Daming OS 初始化成功！已在 {os.path.abspath(target_dir)} 创建骨架。")
     print("👉 请修改 .env 文件中的 API KEY，然后您就可以启动您的智能体了！")
 
 def main():
-    parser = argparse.ArgumentParser(description="Agent OS Command Line Interface")
+    parser = argparse.ArgumentParser(description="Daming OS Command Line Interface")
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
     
-    init_parser = subparsers.add_parser("init", help="Initialize a new Agent OS workspace")
+    init_parser = subparsers.add_parser("init", help="Initialize a new Daming OS workspace")
     init_parser.add_argument("--dir", default=".", help="Target directory to initialize")
     
     args = parser.parse_args()

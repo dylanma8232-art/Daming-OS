@@ -10,7 +10,7 @@ from .hot import SessionStateMachine
 from .warm import vector_search
 from .cold import sparse_search
 
-logger = logging.getLogger("agent_os.memory.core")
+logger = logging.getLogger("daming_os.memory.core")
 
 def rrf_fusion(ranked_lists: List[List[Dict[str, Any]]], k: int = 10) -> List[Dict[str, Any]]:
     """Reciprocal Rank Fusion (RRF)"""
@@ -75,11 +75,11 @@ class MemorySystem:
         self.cache = HardenedSemanticCache()
         self.sqlite_manager = HardenedSQLiteManager()
         self.traverser = SpreadingActivationTraverser()
-        self.hot_state = SessionStateMachine(session_dir="/tmp/agent_os_sessions")
+        self.hot_state = SessionStateMachine(session_dir="/tmp/daming_os_sessions")
         
         # Subscribe to Growth OS events to handle cache clearing neutrally
         bus.subscribe(EvolutionCompletedEvent, self._on_evolution_completed)
-        logger.info("Memory System initialized. Subscribed to EvolutionCompletedEvent.")
+        logger.info("大明记忆系统 initialized. Subscribed to EvolutionCompletedEvent.")
 
     def _on_evolution_completed(self, event: EvolutionCompletedEvent):
         """Event Listener: Flush L1/L2 semantic cache when a new capability is evolved."""
@@ -176,5 +176,5 @@ class MemorySystem:
         Store short-term memory to Layer 1 (Hot) which will eventually 
         be flushed to LanceDB and FTS5.
         """
-        logger.info(f"Stored context into Memory System. Meta: {metadata}")
+        logger.info(f"Stored context into 大明记忆系统. Meta: {metadata}")
         return self.hot_state.write_memory(session_key, {"content": content, "meta": metadata})

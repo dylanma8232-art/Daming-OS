@@ -7,7 +7,7 @@ from ..config import config
 from ..events import bus, EvolutionCompletedEvent
 from .sandbox import SandboxGate
 
-logger = logging.getLogger("agent_os.growth.orchestrator")
+logger = logging.getLogger("daming_os.growth.orchestrator")
 
 class ApprovalAdapter(ABC):
     @abstractmethod

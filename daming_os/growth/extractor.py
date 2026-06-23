@@ -5,7 +5,7 @@ from typing import List, Dict, Any, Optional
 from ..llm import LLMProvider
 from ..config import config
 
-logger = logging.getLogger("agent_os.growth.extractor")
+logger = logging.getLogger("daming_os.growth.extractor")
 
 class ExperienceExtractor:
     def __init__(self, model_name: str = "gpt-4o"):

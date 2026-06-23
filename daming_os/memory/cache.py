@@ -7,7 +7,7 @@ import logging
 import collections
 from typing import Dict, Any, Optional, List
 
-logger = logging.getLogger("agent_os.memory.cache")
+logger = logging.getLogger("daming_os.memory.cache")
 
 class HardenedSemanticCache:
     """
@@ -27,7 +27,7 @@ class HardenedSemanticCache:
                  hr_window_size: int = 100,
                  hr_target: float = 0.80,
                  beta_anneal: float = 0.10,
-                 cache_file: str = "/tmp/agent_os_semantic_cache.json"):
+                 cache_file: str = "/tmp/daming_os_semantic_cache.json"):
         self.max_size = max_size
         self.t_inf = t_inf
         self.l_min = l_min

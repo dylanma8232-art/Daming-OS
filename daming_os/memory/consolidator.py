@@ -1,11 +1,11 @@
 import logging
 from ..config import config
 
-logger = logging.getLogger("agent_os.memory.consolidator")
+logger = logging.getLogger("daming_os.memory.consolidator")
 
 class MemoryConsolidator:
     """
-    Handles deep sleep background tasks for the Memory System.
+    Handles deep sleep background tasks for the 大明记忆系统.
     Consolidates hot memory to warm (LanceDB/SQLite) and cold (Obsidian Markdown) layers.
     """
     def __init__(self):

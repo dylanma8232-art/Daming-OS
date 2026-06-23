@@ -1,14 +1,14 @@
 import logging
 from typing import Callable, Dict, List, Any
 
-logger = logging.getLogger("agent_os.events")
+logger = logging.getLogger("daming_os.events")
 
 class Event:
-    """Base class for all Agent OS events."""
+    """Base class for all Daming OS events."""
     pass
 
 class EvolutionCompletedEvent(Event):
-    """Fired when the Growth System completes a successful evolution."""
+    """Fired when the 大明成长系统 completes a successful evolution."""
     def __init__(self, proposal_id: str, diff_summary: str, scope_tags: List[str]):
         self.proposal_id = proposal_id
         self.diff_summary = diff_summary
