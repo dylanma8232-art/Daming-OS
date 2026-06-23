@@ -4,14 +4,14 @@ from typing import Callable, Any
 from .memory.core import MemorySystem
 from .events import bus, LogEvent
 
-logger = logging.getLogger("agent_os.middleware")
+logger = logging.getLogger("daming_os.middleware")
 
 # Global instances for the decorators to use
 _global_memory = MemorySystem()
 
 def attach_memory():
     """
-    Decorator to attach Memory System 3.0 to an Agent's processing function.
+    Decorator to attach 大明记忆系统 3.0 to an Agent's processing function.
     Automatically injects context before the function runs and stores the result after.
     """
     def decorator(func: Callable):
@@ -19,7 +19,7 @@ def attach_memory():
         def wrapper(agent_input: str, *args, **kwargs) -> Any:
             # 1. Retrieve Context
             context = _global_memory.query(agent_input)
-            kwargs["agent_os_context"] = context
+            kwargs["daming_os_context"] = context
             
             # 2. Execute Agent
             result = func(agent_input, *args, **kwargs)
@@ -32,7 +32,7 @@ def attach_memory():
 
 def attach_growth():
     """
-    Decorator to attach Growth System 2.0 to an Agent's processing function.
+    Decorator to attach 大明成长系统 2.0 to an Agent's processing function.
     Automatically intercepts exceptions and publishes them to the Event Bus for GEP tracking.
     """
     def decorator(func: Callable):

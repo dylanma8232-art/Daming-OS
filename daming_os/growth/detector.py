@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from ..config import config
 from ..events import bus, LogEvent
 
-logger = logging.getLogger("agent_os.growth.detector")
+logger = logging.getLogger("daming_os.growth.detector")
 
 class GEPDetector:
     """

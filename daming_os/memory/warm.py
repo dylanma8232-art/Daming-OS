@@ -1,7 +1,7 @@
 import logging
 from typing import List, Dict, Any
 
-logger = logging.getLogger("agent_os.memory.warm")
+logger = logging.getLogger("daming_os.memory.warm")
 
 def vector_search(query: str, query_vector: List[float], db_path: str, top_k: int = 20) -> List[Dict[str, Any]]:
     """LanceDB Dense Vector Search. Layer 2 (Warm)."""

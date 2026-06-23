@@ -5,7 +5,7 @@ from typing import Dict, List, Any, Optional
 
 from ..config import config
 
-logger = logging.getLogger("agent_os.memory.db")
+logger = logging.getLogger("daming_os.memory.db")
 
 class HardenedSQLiteManager:
     """
