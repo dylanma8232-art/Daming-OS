@@ -15,17 +15,55 @@ from .runtime import HotMemoryJournal
 
 
 class FileTracker:
-    def __init__(self, path: str): self.path = Path(path); self.path.parent.mkdir(parents=True, exist_ok=True)
+    def __init__(self, path: str):
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._cache: Dict[str, Any] = {}
+
+    def _get_file_state(self, file_path: Path, old_state: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            stat = file_path.stat()
+            mtime = stat.st_mtime
+            size = stat.st_size
+        except OSError:
+            return {"hash": "", "mtime": 0, "size": 0}
+
+        path_str = str(file_path)
+        old_entry = old_state.get(path_str)
+
+        if isinstance(old_entry, dict):
+            if old_entry.get("mtime") == mtime and old_entry.get("size") == size:
+                return old_entry
+
+        return {"hash": hashlib.sha256(file_path.read_bytes()).hexdigest(), "mtime": mtime, "size": size}
+
     def snapshot(self, files: Iterable[str]) -> Dict[str, str]:
-        state = {str(Path(item)): hashlib.sha256(Path(item).read_bytes()).hexdigest()
-                 for item in files if Path(item).is_file()}
+        old = json.loads(self.path.read_text(encoding="utf-8")) if self.path.exists() else {}
+        state = {}
+        for item in files:
+            p = Path(item)
+            if p.is_file():
+                path_str = str(p)
+                state[path_str] = self._cache.get(path_str) or self._get_file_state(p, old)
         self.path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
-        return state
+        self._cache.clear()
+        return {key: value["hash"] for key, value in state.items()}
+
     def changed(self, files: Iterable[str]) -> List[str]:
         old = json.loads(self.path.read_text(encoding="utf-8")) if self.path.exists() else {}
-        current = {str(Path(item)): hashlib.sha256(Path(item).read_bytes()).hexdigest()
-                   for item in files if Path(item).is_file()}
-        return sorted(key for key, value in current.items() if old.get(key) != value)
+        self._cache.clear()
+        changed_files = []
+        for item in files:
+            p = Path(item)
+            if p.is_file():
+                path_str = str(p)
+                new_state = self._get_file_state(p, old)
+                self._cache[path_str] = new_state
+                old_entry = old.get(path_str)
+                old_hash = old_entry.get("hash") if isinstance(old_entry, dict) else old_entry
+                if old_hash != new_state["hash"]:
+                    changed_files.append(path_str)
+        return sorted(changed_files)
 
 
 class PathScopedRules:
