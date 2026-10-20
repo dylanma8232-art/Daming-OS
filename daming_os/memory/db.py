@@ -1,11 +1,32 @@
 import sqlite3
 import json
 import logging
+import threading
 from contextlib import closing
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
 from ..config import config
+
+_local = threading.local()
+
+def _get_fts_connection(db_path: str) -> sqlite3.Connection:
+    """Thread-local connection cache for FTS search to eliminate DDL latency."""
+    if not hasattr(_local, "fts_conns"):
+        _local.fts_conns = {}
+
+    if db_path not in _local.fts_conns:
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(db_path)
+        # Ensure FTS5 table exists only once per connection setup
+        conn.execute('''
+            CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
+                item_id, content
+            )
+        ''')
+        _local.fts_conns[db_path] = conn
+
+    return _local.fts_conns[db_path]
 
 logger = logging.getLogger("daming_os.memory.db")
 
@@ -109,16 +130,8 @@ def fts5_search(query: str, db_path: Optional[str] = None, top_k: int = 10) -> L
     raw = Path(db_path or config.SQLITE_META_PATH)
     db_path = str(raw if raw.is_absolute() else Path(config.WORKSPACE_ROOT) / raw)
     try:
-        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(db_path)
+        conn = _get_fts_connection(db_path)
         cursor = conn.cursor()
-        
-        # 确保 FTS5 表存在
-        cursor.execute('''
-            CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
-                item_id, content
-            )
-        ''')
         
         # 清洗查询文本，转换为 FTS5 MATCH 语法
         clean_query = ''.join(c if c.isalnum() else ' ' for c in query)
@@ -144,9 +157,6 @@ def fts5_search(query: str, db_path: Optional[str] = None, top_k: int = 10) -> L
     except Exception as e:
         logger.warning(f"FTS5 search failed: {e}")
         return []
-    finally:
-        if 'conn' in locals():
-            conn.close()
 
 def get_markdown_content(item_id: str, sqlite_manager: HardenedSQLiteManager) -> Optional[str]:
     """Retrieves physical content for an item"""
