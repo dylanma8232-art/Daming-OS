@@ -1,5 +1,6 @@
 import logging
 import collections
+from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
 
 from ..config import config
@@ -31,6 +32,14 @@ def rrf_fusion(ranked_lists: List[List[Dict[str, Any]]], k: int = 10) -> List[Di
         {"id": mid, "rrf_score": round(scores[mid], 6)}
         for mid in sorted_ids
     ]
+
+@dataclass
+class QueryContext:
+    query_vector: Optional[List[float]] = None
+    top_k: int = 3
+    max_chars: int = 1000
+    messages: Optional[List[Dict[str, Any]]] = None
+    scope: Optional['MemoryScope'] = None
 
 class SpreadingActivationTraverser:
     """Spreading Activation Traverser for Graph Search"""
@@ -103,18 +112,19 @@ class MemorySystem:
     def close(self) -> None:
         bus.unsubscribe(EvolutionCompletedEvent, self._on_evolution_completed)
 
-    def query(self, text: str, query_vector: Optional[List[float]] = None, top_k: int = 3,
-              max_chars: int = 1000, messages: Optional[List[Dict[str, Any]]] = None,
-              scope: Optional[MemoryScope] = None) -> List[Dict[str, Any]]:
+    def query(self, text: str, context: Optional[QueryContext] = None) -> List[Dict[str, Any]]:
         """
         Primary interface for agent retrieval.
         Attempts L1/L2 cache first, then performs 3-Way RRF fallback.
         """
+        if context is None:
+            context = QueryContext()
+
         # 针对多轮会话追问进行前置上下文拼接，消除指代失忆
         recall_query = text
-        if messages and isinstance(messages, list):
+        if context.messages and isinstance(context.messages, list):
             user_texts = []
-            for msg in reversed(messages):
+            for msg in reversed(context.messages):
                 if isinstance(msg, dict) and msg.get("role") == "user":
                     content = msg.get("content", "")
                     if isinstance(content, str) and content.strip():
@@ -127,28 +137,28 @@ class MemorySystem:
 
         # The complete isolation scope belongs to the cache key.  A tenant-only
         # key could still leak an agent or session scoped result.
-        if scope:
-            scope_key = "|".join((scope.tenant_id or "", scope.agent_id or "", scope.session_id or ""))
+        if context.scope:
+            scope_key = "|".join((context.scope.tenant_id or "", context.scope.agent_id or "", context.scope.session_id or ""))
             recall_query = f"scope:{scope_key}\n{recall_query}"
 
         # L2 needs an embedding *before* cache lookup.  The old order made the
         # semantic cache unreachable for the default adapter path.
-        if query_vector is None and self.embedding_provider is not None:
+        if context.query_vector is None and self.embedding_provider is not None:
             try:
-                query_vector = self.embedding_provider.embed(recall_query)
+                context.query_vector = self.embedding_provider.embed(recall_query)
             except Exception as exc:
                 logger.warning("Embedding generation failed; using sparse retrieval: %s", exc)
 
-        cached_result = self.cache.get(recall_query, query_vector)
+        cached_result = self.cache.get(recall_query, context.query_vector)
         if cached_result is not None:
             logger.debug("L1/L2 cache hit for query.")
-            return cached_result[:top_k]
+            return cached_result[:context.top_k]
 
         logger.debug("Cache miss. Performing 3-Way RRF retrieval.")
         
         # 1. Warm Layer (LanceDB Dense Vector Search)
-        warm_results = (vector_search(recall_query, query_vector, db_path=self.vector_path, top_k=20)
-                        if query_vector is not None else [])
+        warm_results = (vector_search(recall_query, context.query_vector, db_path=self.vector_path, top_k=20)
+                        if context.query_vector is not None else [])
         
         # Fallback if LanceDB has no results
         if not warm_results:
@@ -174,17 +184,17 @@ class MemorySystem:
         for res in fused:
             content = get_markdown_content(res["id"], self.sqlite_manager)
             if content:
-                if len(content) > max_chars:
-                    res["content"] = content[:max_chars] + "\n\n... [Content Truncated due to length limit]"
+                if len(content) > context.max_chars:
+                    res["content"] = content[:context.max_chars] + "\n\n... [Content Truncated due to length limit]"
                 else:
                     res["content"] = content
                 
         # Apply safety/Q-value ranking & Message Compactor math
-        final_results = self._apply_safety_and_qvalue(fused, scope)[:10]
+        final_results = self._apply_safety_and_qvalue(fused, context.scope)[:10]
 
         # Store back to cache
-        self.cache.set(recall_query, final_results, query_vector)
-        return final_results[:top_k]
+        self.cache.set(recall_query, final_results, context.query_vector)
+        return final_results[:context.top_k]
 
     def _apply_safety_and_qvalue(self, results: List[Dict[str, Any]],
                                  scope: Optional[MemoryScope] = None) -> List[Dict[str, Any]]:

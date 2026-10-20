@@ -10,7 +10,7 @@ from pathlib import Path
 from daming_os import AgentContext, DamingHookBridge, SkillLazyLoader
 from daming_os.blueprint import missing_runtime_triggers
 from daming_os.cli import doctor, init_workspace, install_host, manage_approval, status
-from daming_os.memory.core import MemorySystem
+from daming_os.memory.core import MemorySystem, QueryContext
 from daming_os.scheduling import DurableScheduler
 from daming_os.events import EvolutionTriggeredEvent, bus
 from daming_os.growth.governance import GrowthLedger
@@ -428,7 +428,7 @@ class TestPortableRuntime(unittest.TestCase):
             with closing(sqlite3.connect(db)) as connection:
                 self.assertEqual(connection.execute("SELECT COUNT(*) FROM items").fetchone()[0], 2)
                 self.assertGreaterEqual(connection.execute("SELECT COUNT(*) FROM wiki_edges").fetchone()[0], 1)
-            results = runtime.adapter.memory.query("alpha memory relation", scope=None)
+            results = runtime.adapter.memory.query("alpha memory relation", context=QueryContext(scope=None))
             self.assertTrue(results)
             self.assertTrue(list((Path(tmp) / "wiki" / "main" / "experiences").glob("*.md")))
             lancedb_dir = Path(tmp) / "memory" / "lancedb"

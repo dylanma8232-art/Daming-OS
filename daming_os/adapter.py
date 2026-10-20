@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Optional, Protocol, runtime_checkable
 
 from .events import AgentLifecycleEvent, LogEvent, bus
-from .memory.core import MemorySystem
+from .memory.core import MemorySystem, QueryContext
 from .memory.governance import MemoryScope
 
 
@@ -48,7 +48,8 @@ class DamingAdapter:
         if not self.auto_recall:
             return []
         scope = MemoryScope(context.tenant_id, context.agent_id, context.session_id)
-        return self.memory.query(user_input, messages=context.metadata.get("messages"), scope=scope)
+        query_context = QueryContext(messages=context.metadata.get("messages"), scope=scope)
+        return self.memory.query(user_input, context=query_context)
 
     def after_turn(self, user_input: str, output: Any, context: AgentContext) -> None:
         metadata = {**context.metadata, "agent_id": context.agent_id,
