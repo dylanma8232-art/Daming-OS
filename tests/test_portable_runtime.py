@@ -50,6 +50,8 @@ class _Adapter:
         self.calls.append(("error", str(error), context.session_id))
     def compact_context(self, context):
         return [{"role": "system", "content": "compacted"}]
+    def record_signal(self, kind, content, context):
+        self.calls.append(("signal", kind, content, context.session_id))
 
 
 class _Notifier:
@@ -69,15 +71,32 @@ class TestPortableRuntime(unittest.TestCase):
 
     def test_hook_bridge_supports_a_generic_agent_registrar(self):
         adapter = _Adapter()
-        bridge = DamingHookBridge(adapter=adapter)
+        bridge = DamingHookBridge(
+            adapter=adapter,
+            skill_context_callback=lambda user_input, context: "mock_skill_context"
+        )
         registered = {}
         bridge.install(lambda name, callback: registered.setdefault(name, callback))
-        payload = {"input": "hello", "session_id": "s", "metadata": {"messages": []}}
+        self.assertEqual(registered["before_turn"], bridge.before_turn)
+        self.assertEqual(registered["after_turn"], bridge.after_turn)
+        self.assertEqual(registered["error"], bridge.on_error)
+
+        payload = {
+            "input": "hello",
+            "session_id": "s",
+            "metadata": {"messages": []},
+            "growth_signals": [{"type": "t1", "content": "c1"}],
+            "feedback": "user feedback"
+        }
         self.assertEqual(registered["before_turn"](payload)["daming_memories"][0]["id"], "memory")
         self.assertEqual(payload["messages"][0]["content"], "compacted")
+        self.assertEqual(payload["daming_skill_context"], "mock_skill_context")
         registered["after_turn"]({"input": "hello", "output": "done", "session_id": "s"})
         registered["error"]({"error": "bad", "session_id": "s"})
-        self.assertEqual([call[0] for call in adapter.calls], ["before", "after", "error"])
+
+        self.assertIn(("signal", "t1", "c1", "s"), adapter.calls)
+        self.assertIn(("signal", "user_feedback", "user feedback", "s"), adapter.calls)
+        self.assertEqual([call[0] for call in adapter.calls if call[0] != "signal"], ["before", "after", "error"])
 
     def test_lazy_skill_loading_defers_file_read_until_requested(self):
         with tempfile.TemporaryDirectory() as tmp:
