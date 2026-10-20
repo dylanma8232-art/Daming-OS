@@ -3,6 +3,7 @@ import unittest
 import json
 import importlib.util
 import sqlite3
+from unittest.mock import patch
 from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
@@ -87,6 +88,26 @@ class TestPortableRuntime(unittest.TestCase):
             loader = SkillLazyLoader([str(Path(tmp) / "skills")])
             self.assertEqual(loader.discover(), ["review"])
             self.assertEqual(loader.load("review").body, "# Review\n")
+
+    def test_lazy_skill_loading_checks_eligibility_prerequisites(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            skill = Path(tmp) / "skills" / "build" / "SKILL.md"
+            skill.parent.mkdir(parents=True)
+            skill.write_text("# Build\n", encoding="utf-8")
+            loader = SkillLazyLoader([str(Path(tmp) / "skills")])
+
+            with patch("os.getenv", return_value="1"), patch("shutil.which", return_value="/bin/tool"):
+                loaded = loader.eligible("build", required_env=["CI"], required_binaries=["tool"])
+                self.assertIsNotNone(loaded)
+                self.assertEqual(loaded.name, "build")
+
+            with patch("os.getenv", return_value=None), patch("shutil.which", return_value="/bin/tool"):
+                loaded = loader.eligible("build", required_env=["MISSING"], required_binaries=["tool"])
+                self.assertIsNone(loaded)
+
+            with patch("os.getenv", return_value="1"), patch("shutil.which", return_value=None):
+                loaded = loader.eligible("build", required_env=["CI"], required_binaries=["missing_tool"])
+                self.assertIsNone(loaded)
 
     def test_durable_scheduler_runs_jobs_from_hook_or_heartbeat_ticks(self):
         with tempfile.TemporaryDirectory() as tmp:
