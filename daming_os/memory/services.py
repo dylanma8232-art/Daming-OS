@@ -93,9 +93,12 @@ class FilesystemWikiProvider:
         self.directory = Path(directory)
 
     def push(self, documents: Dict[str, str]) -> None:
+        created_dirs = set()
         for relative, content in documents.items():
             target = self.directory / relative
-            target.parent.mkdir(parents=True, exist_ok=True)
+            if target.parent not in created_dirs:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                created_dirs.add(target.parent)
             target.write_text(content, encoding="utf-8")
 
     def pull(self) -> Dict[str, str]:
@@ -118,11 +121,14 @@ class WikiSynchronizer:
         self.provider.push(local_docs)
         pulled = self.provider.pull()
         changed = 0
+        created_dirs = set()
         for relative, content in pulled.items():
             target = self.local / relative
             old = target.read_text(encoding="utf-8") if target.exists() else None
             if old != content:
-                target.parent.mkdir(parents=True, exist_ok=True)
+                if target.parent not in created_dirs:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    created_dirs.add(target.parent)
                 target.write_text(content, encoding="utf-8")
                 changed += 1
         return {"pushed": len(local_docs), "pulled": len(pulled), "changed": changed}
