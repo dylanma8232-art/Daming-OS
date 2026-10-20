@@ -1,3 +1,4 @@
+from dataclasses import dataclass, field
 import logging
 import collections
 from typing import List, Dict, Any, Optional
@@ -69,6 +70,15 @@ class SpreadingActivationTraverser:
         
         return sorted([{"id": k, "score": v, "source": "graph"} for k, v in results.items() if k not in seed_ids], key=lambda x: -x["score"])
 
+
+@dataclass
+class QueryOptions:
+    query_vector: Optional[List[float]] = None
+    top_k: int = 3
+    max_chars: int = 1000
+    messages: Optional[List[Dict[str, Any]]] = None
+    scope: Optional[MemoryScope] = None
+
 class MemorySystem:
     """
     Core Memory Engine implementing 3-Way RRF (Reciprocal Rank Fusion).
@@ -103,13 +113,18 @@ class MemorySystem:
     def close(self) -> None:
         bus.unsubscribe(EvolutionCompletedEvent, self._on_evolution_completed)
 
-    def query(self, text: str, query_vector: Optional[List[float]] = None, top_k: int = 3,
-              max_chars: int = 1000, messages: Optional[List[Dict[str, Any]]] = None,
-              scope: Optional[MemoryScope] = None) -> List[Dict[str, Any]]:
+    def query(self, text: str, options: Optional[QueryOptions] = None) -> List[Dict[str, Any]]:
         """
         Primary interface for agent retrieval.
         Attempts L1/L2 cache first, then performs 3-Way RRF fallback.
         """
+        options = options or QueryOptions()
+        query_vector = options.query_vector
+        top_k = options.top_k
+        max_chars = options.max_chars
+        messages = options.messages
+        scope = options.scope
+
         # 针对多轮会话追问进行前置上下文拼接，消除指代失忆
         recall_query = text
         if messages and isinstance(messages, list):
