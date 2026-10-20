@@ -1,5 +1,6 @@
 import logging
 import collections
+import time
 from typing import List, Dict, Any, Optional
 
 from ..config import config
@@ -34,9 +35,22 @@ def rrf_fusion(ranked_lists: List[List[Dict[str, Any]]], k: int = 10) -> List[Di
 
 class SpreadingActivationTraverser:
     """Spreading Activation Traverser for Graph Search"""
+    def __init__(self, cache_ttl: float = 60.0):
+        self._adj_list_cache = None
+        self._cache_time = 0.0
+        self._cache_ttl = cache_ttl
+        self._db_path = None
+
     def traverse(self, seed_ids: List[str], db_path: str) -> List[Dict[str, Any]]:
         manager = HardenedSQLiteManager(db_path)
-        adj_list = manager.get_adjacency_list()
+
+        current_time = time.time()
+        if self._adj_list_cache is None or self._db_path != db_path or (current_time - self._cache_time) > self._cache_ttl:
+            self._adj_list_cache = manager.get_adjacency_list()
+            self._cache_time = current_time
+            self._db_path = db_path
+
+        adj_list = self._adj_list_cache
         
         beta = 0.5
         gamma = 0.1
