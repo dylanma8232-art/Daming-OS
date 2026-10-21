@@ -16,15 +16,15 @@ from .runtime import HotMemoryJournal
 class FileTracker:
     def __init__(self, path: str):
         self.path = Path(path); self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._cache: Dict[str, tuple[float, int, str]] = {}
+        self._cache: Dict[str, tuple[tuple[int, int, int, int, int], str]] = {}
     def _hash(self, p: Path) -> str:
         s = p.stat()
-        k = (s.st_mtime, s.st_size)
+        k = (s.st_mtime_ns, s.st_ctime_ns, s.st_size, s.st_ino, s.st_dev)
         path_str = str(p)
-        if path_str in self._cache and self._cache[path_str][:2] == k:
-            return self._cache[path_str][2]
+        if path_str in self._cache and self._cache[path_str][0] == k:
+            return self._cache[path_str][1]
         h = hashlib.sha256(p.read_bytes()).hexdigest()
-        self._cache[path_str] = (k[0], k[1], h)
+        self._cache[path_str] = (k, h)
         return h
     def snapshot(self, files: Iterable[str]) -> Dict[str, str]:
         state = {str(Path(item)): self._hash(Path(item))
