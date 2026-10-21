@@ -56,7 +56,7 @@ class DamingHookBridge:
             compacted = self.adapter.compact_context(context)
             payload["daming_compacted_messages"] = compacted
             # Preserve the original generic-hook behaviour for empty hosts,
-            # while non-empty chat histories remain host-owned and intact.
+            # non-empty chat histories remain host-owned and intact.
             if not messages:
                 payload["messages"] = compacted
         if self.skill_context_callback is not None:
