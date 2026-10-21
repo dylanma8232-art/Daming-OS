@@ -68,6 +68,15 @@ class TestPortableRuntime(unittest.TestCase):
         memory.query("semantic cache query")
         self.assertEqual(probe.vectors[0], [1.0, 0.0])
 
+
+    def test_daming_hook_bridge_install(self):
+        bridge = DamingHookBridge()
+        registered = {}
+        bridge.install(lambda name, callback: registered.setdefault(name, callback))
+        self.assertEqual(registered["before_turn"], bridge.before_turn)
+        self.assertEqual(registered["after_turn"], bridge.after_turn)
+        self.assertEqual(registered["error"], bridge.on_error)
+
     def test_hook_bridge_supports_a_generic_agent_registrar(self):
         adapter = _Adapter()
         bridge = DamingHookBridge(adapter=adapter)
@@ -79,6 +88,46 @@ class TestPortableRuntime(unittest.TestCase):
         registered["after_turn"]({"input": "hello", "output": "done", "session_id": "s"})
         registered["error"]({"error": "bad", "session_id": "s"})
         self.assertEqual([call[0] for call in adapter.calls], ["before", "after", "error"])
+
+
+    def test_daming_hook_bridge_before_turn_coverage(self):
+        class _SignalAdapter(_Adapter):
+            def __init__(self):
+                super().__init__()
+                self.signals = []
+            def record_signal(self, kind, content, context):
+                self.signals.append((kind, content, context.session_id))
+
+        adapter = _SignalAdapter()
+        def dummy_skill_context(user_input, context):
+            return "dummy_context"
+
+        bridge = DamingHookBridge(adapter=adapter, skill_context_callback=dummy_skill_context)
+        payload = {
+            "input": "hello",
+            "session_id": "s",
+            "metadata": {"messages": []},
+            "growth_signals": [{"type": "test_type", "content": "test_content"}],
+            "feedback": "test_feedback",
+            "discovery": "test_discovery",
+            "rule_violation": "test_rule_violation",
+            "system_error": "test_system_error"
+        }
+
+        result = bridge.before_turn(payload)
+
+        # Verify signals were recorded
+        expected_signals = [
+            ("test_type", "test_content", "s"),
+            ("user_feedback", "test_feedback", "s"),
+            ("discovery", "test_discovery", "s"),
+            ("rule_violation", "test_rule_violation", "s"),
+            ("system_error", "test_system_error", "s"),
+        ]
+        self.assertEqual(adapter.signals, expected_signals)
+
+        # Verify skill context was injected
+        self.assertEqual(result.get("daming_skill_context"), "dummy_context")
 
     def test_lazy_skill_loading_defers_file_read_until_requested(self):
         with tempfile.TemporaryDirectory() as tmp:
