@@ -85,8 +85,13 @@ class HotMemoryJournal:
         for record in recent:
             messages.append({"role": "system", "content": record.summary, "turn_id": record.turn_id,
                              "tool_calls": record.tool_calls, "state_diff": record.state_diff})
-        while messages and sum(estimate_tokens(str(message.get("content", ""))) for message in messages) > max_tokens:
-            messages.pop(1 if len(messages) > 1 and messages[0].get("content", "").startswith("[COMPACTED") else 0)
+
+        current_tokens = sum(estimate_tokens(str(message.get("content", ""))) for message in messages)
+        while messages and current_tokens > max_tokens:
+            pop_index = 1 if len(messages) > 1 and messages[0].get("content", "").startswith("[COMPACTED") else 0
+            popped_message = messages.pop(pop_index)
+            current_tokens -= estimate_tokens(str(popped_message.get("content", "")))
+
         return messages
 
     def _path(self, session_id: str) -> Path:
