@@ -3,6 +3,7 @@ import unittest
 import json
 import importlib.util
 import sqlite3
+from unittest.mock import patch
 from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,7 +11,7 @@ from pathlib import Path
 from daming_os import AgentContext, DamingHookBridge, SkillLazyLoader
 from daming_os.blueprint import missing_runtime_triggers
 from daming_os.cli import doctor, init_workspace, install_host, manage_approval, status
-from daming_os.memory.core import MemorySystem
+from daming_os.memory.core import MemorySystem, QueryOptions
 from daming_os.scheduling import DurableScheduler
 from daming_os.events import EvolutionTriggeredEvent, bus
 from daming_os.growth.governance import GrowthLedger
@@ -50,6 +51,8 @@ class _Adapter:
         self.calls.append(("error", str(error), context.session_id))
     def compact_context(self, context):
         return [{"role": "system", "content": "compacted"}]
+    def record_signal(self, kind, content, context):
+        self.calls.append(("signal", kind, content, context.session_id))
 
 
 class _Notifier:
@@ -67,17 +70,83 @@ class TestPortableRuntime(unittest.TestCase):
         memory.query("semantic cache query")
         self.assertEqual(probe.vectors[0], [1.0, 0.0])
 
-    def test_hook_bridge_supports_a_generic_agent_registrar(self):
-        adapter = _Adapter()
-        bridge = DamingHookBridge(adapter=adapter)
+
+    def test_daming_hook_bridge_install(self):
+        bridge = DamingHookBridge()
         registered = {}
         bridge.install(lambda name, callback: registered.setdefault(name, callback))
-        payload = {"input": "hello", "session_id": "s", "metadata": {"messages": []}}
+        self.assertEqual(registered["before_turn"], bridge.before_turn)
+        self.assertEqual(registered["after_turn"], bridge.after_turn)
+        self.assertEqual(registered["error"], bridge.on_error)
+
+    def test_hook_bridge_supports_a_generic_agent_registrar(self):
+        adapter = _Adapter()
+        bridge = DamingHookBridge(
+            adapter=adapter,
+            skill_context_callback=lambda user_input, context: "mock_skill_context"
+        )
+        registered = {}
+        bridge.install(lambda name, callback: registered.setdefault(name, callback))
+        self.assertEqual(registered["before_turn"], bridge.before_turn)
+        self.assertEqual(registered["after_turn"], bridge.after_turn)
+        self.assertEqual(registered["error"], bridge.on_error)
+
+        payload = {
+            "input": "hello",
+            "session_id": "s",
+            "metadata": {"messages": []},
+            "growth_signals": [{"type": "t1", "content": "c1"}],
+            "feedback": "user feedback"
+        }
         self.assertEqual(registered["before_turn"](payload)["daming_memories"][0]["id"], "memory")
         self.assertEqual(payload["messages"][0]["content"], "compacted")
+        self.assertEqual(payload["daming_skill_context"], "mock_skill_context")
         registered["after_turn"]({"input": "hello", "output": "done", "session_id": "s"})
         registered["error"]({"error": "bad", "session_id": "s"})
-        self.assertEqual([call[0] for call in adapter.calls], ["before", "after", "error"])
+
+        self.assertIn(("signal", "t1", "c1", "s"), adapter.calls)
+        self.assertIn(("signal", "user_feedback", "user feedback", "s"), adapter.calls)
+        self.assertEqual([call[0] for call in adapter.calls if call[0] != "signal"], ["before", "after", "error"])
+
+
+    def test_daming_hook_bridge_before_turn_coverage(self):
+        class _SignalAdapter(_Adapter):
+            def __init__(self):
+                super().__init__()
+                self.signals = []
+            def record_signal(self, kind, content, context):
+                self.signals.append((kind, content, context.session_id))
+
+        adapter = _SignalAdapter()
+        def dummy_skill_context(user_input, context):
+            return "dummy_context"
+
+        bridge = DamingHookBridge(adapter=adapter, skill_context_callback=dummy_skill_context)
+        payload = {
+            "input": "hello",
+            "session_id": "s",
+            "metadata": {"messages": []},
+            "growth_signals": [{"type": "test_type", "content": "test_content"}],
+            "feedback": "test_feedback",
+            "discovery": "test_discovery",
+            "rule_violation": "test_rule_violation",
+            "system_error": "test_system_error"
+        }
+
+        result = bridge.before_turn(payload)
+
+        # Verify signals were recorded
+        expected_signals = [
+            ("test_type", "test_content", "s"),
+            ("user_feedback", "test_feedback", "s"),
+            ("discovery", "test_discovery", "s"),
+            ("rule_violation", "test_rule_violation", "s"),
+            ("system_error", "test_system_error", "s"),
+        ]
+        self.assertEqual(adapter.signals, expected_signals)
+
+        # Verify skill context was injected
+        self.assertEqual(result.get("daming_skill_context"), "dummy_context")
 
     def test_lazy_skill_loading_defers_file_read_until_requested(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -87,6 +156,26 @@ class TestPortableRuntime(unittest.TestCase):
             loader = SkillLazyLoader([str(Path(tmp) / "skills")])
             self.assertEqual(loader.discover(), ["review"])
             self.assertEqual(loader.load("review").body, "# Review\n")
+
+    def test_lazy_skill_loading_checks_eligibility_prerequisites(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            skill = Path(tmp) / "skills" / "build" / "SKILL.md"
+            skill.parent.mkdir(parents=True)
+            skill.write_text("# Build\n", encoding="utf-8")
+            loader = SkillLazyLoader([str(Path(tmp) / "skills")])
+
+            with patch("os.getenv", return_value="1"), patch("shutil.which", return_value="/bin/tool"):
+                loaded = loader.eligible("build", required_env=["CI"], required_binaries=["tool"])
+                self.assertIsNotNone(loaded)
+                self.assertEqual(loaded.name, "build")
+
+            with patch("os.getenv", return_value=None), patch("shutil.which", return_value="/bin/tool"):
+                loaded = loader.eligible("build", required_env=["MISSING"], required_binaries=["tool"])
+                self.assertIsNone(loaded)
+
+            with patch("os.getenv", return_value="1"), patch("shutil.which", return_value=None):
+                loaded = loader.eligible("build", required_env=["CI"], required_binaries=["missing_tool"])
+                self.assertIsNone(loaded)
 
     def test_durable_scheduler_runs_jobs_from_hook_or_heartbeat_ticks(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -428,7 +517,7 @@ class TestPortableRuntime(unittest.TestCase):
             with closing(sqlite3.connect(db)) as connection:
                 self.assertEqual(connection.execute("SELECT COUNT(*) FROM items").fetchone()[0], 2)
                 self.assertGreaterEqual(connection.execute("SELECT COUNT(*) FROM wiki_edges").fetchone()[0], 1)
-            results = runtime.adapter.memory.query("alpha memory relation", scope=None)
+            results = runtime.adapter.memory.query("alpha memory relation", options=QueryOptions(scope=None))
             self.assertTrue(results)
             self.assertTrue(list((Path(tmp) / "wiki" / "main" / "experiences").glob("*.md")))
             lancedb_dir = Path(tmp) / "memory" / "lancedb"

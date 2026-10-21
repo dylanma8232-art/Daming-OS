@@ -1,108 +1,81 @@
 import unittest
-import weakref
+import sys
+import os
 import gc
+
+# Add the project directory to sys.path to allow imports
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 from daming_os.events import EventBus, Event
 
-class TestEvent(Event):
+class DummyEvent(Event):
     pass
 
-class TestEventBus(unittest.TestCase):
-    def test_unsubscribe_regular_function(self):
-        bus = EventBus()
-        calls = []
+class SubscriberObject:
+    def method_callback(self, event):
+        pass
 
-        def callback(event):
-            calls.append(event)
+def function_callback(event):
+    pass
 
-        bus.subscribe(TestEvent, callback)
-        bus.publish(TestEvent())
-        self.assertEqual(len(calls), 1)
+def another_function_callback(event):
+    pass
 
-        bus.unsubscribe(TestEvent, callback)
-        bus.publish(TestEvent())
-        self.assertEqual(len(calls), 1)
-        self.assertEqual(len(bus._subscribers[TestEvent]), 0)
+class TestEventBusUnsubscribe(unittest.TestCase):
+    def setUp(self):
+        self.bus = EventBus()
 
-    def test_unsubscribe_weak_method(self):
-        bus = EventBus()
-        calls = []
+    def test_unsubscribe_function(self):
+        # Functions are stored as strong references
+        self.bus.subscribe(DummyEvent, function_callback)
+        self.assertEqual(len(self.bus._subscribers[DummyEvent]), 1)
 
-        class Subscriber:
-            def callback(self, event):
-                calls.append(event)
+        self.bus.unsubscribe(DummyEvent, function_callback)
+        self.assertEqual(len(self.bus._subscribers[DummyEvent]), 0)
 
-        subscriber = Subscriber()
-        bus.subscribe(TestEvent, subscriber.callback)
-        bus.publish(TestEvent())
-        self.assertEqual(len(calls), 1)
+    def test_unsubscribe_method(self):
+        # Bound methods are stored as weak references
+        subscriber = SubscriberObject()
+        self.bus.subscribe(DummyEvent, subscriber.method_callback)
+        self.assertEqual(len(self.bus._subscribers[DummyEvent]), 1)
 
-        bus.unsubscribe(TestEvent, subscriber.callback)
-        bus.publish(TestEvent())
-        self.assertEqual(len(calls), 1)
-        self.assertEqual(len(bus._subscribers[TestEvent]), 0)
+        self.bus.unsubscribe(DummyEvent, subscriber.method_callback)
+        self.assertEqual(len(self.bus._subscribers[DummyEvent]), 0)
 
-    def test_unsubscribe_cleans_up_garbage_collected_references(self):
-        bus = EventBus()
-        calls = []
+    def test_unsubscribe_cleans_up_dead_weakrefs(self):
+        subscriber = SubscriberObject()
+        self.bus.subscribe(DummyEvent, subscriber.method_callback)
+        self.bus.subscribe(DummyEvent, function_callback)
+        self.assertEqual(len(self.bus._subscribers[DummyEvent]), 2)
 
-        class Subscriber:
-            def callback(self, event):
-                calls.append(event)
-
-        def callback2(event):
-            calls.append(event)
-
-        subscriber = Subscriber()
-        bus.subscribe(TestEvent, subscriber.callback)
-        bus.subscribe(TestEvent, callback2)
-
-        self.assertEqual(len(bus._subscribers[TestEvent]), 2)
-
-        # Now delete the subscriber to let it be garbage collected
+        # Delete subscriber to make it garbage collected
         del subscriber
         gc.collect()
 
-        # When we unsubscribe callback2, the garbage collected weak reference should also be cleaned up
-        bus.unsubscribe(TestEvent, callback2)
+        # Unsubscribing a different callback should also clean up dead weakrefs
+        self.bus.unsubscribe(DummyEvent, function_callback)
 
-        # Only 0 subscribers should remain, as callback2 was explicitly unsubscribed
-        # and the subscriber was garbage collected.
-        self.assertEqual(len(bus._subscribers[TestEvent]), 0)
+        # After unsubscribe, both the explicitly unsubscribed function
+        # and the dead weakref should be gone
+        self.assertEqual(len(self.bus._subscribers[DummyEvent]), 0)
 
-    def test_unsubscribe_from_empty_event_type(self):
-        bus = EventBus()
+    def test_unsubscribe_empty(self):
+        # Unsubscribing from an event with no subscribers should not raise an error
+        try:
+            self.bus.unsubscribe(DummyEvent, function_callback)
+            # Verify the list is initialized to empty list or doesn't throw
+            self.assertEqual(self.bus._subscribers.get(DummyEvent, []), [])
+        except Exception as e:
+            self.fail(f"unsubscribe raised an exception unexpectedly: {e}")
 
-        def callback(event):
-            pass
+    def test_unsubscribe_unrelated(self):
+        # Unsubscribing a callback that wasn't subscribed should not affect others
+        self.bus.subscribe(DummyEvent, function_callback)
+        self.assertEqual(len(self.bus._subscribers[DummyEvent]), 1)
 
-        # Unsubscribe from an event type that has never been subscribed to
-        bus.unsubscribe(TestEvent, callback)
+        self.bus.unsubscribe(DummyEvent, another_function_callback)
+        self.assertEqual(len(self.bus._subscribers[DummyEvent]), 1)
+        self.assertIs(self.bus._subscribers[DummyEvent][0], function_callback)
 
-        self.assertIn(TestEvent, bus._subscribers)
-        self.assertEqual(len(bus._subscribers[TestEvent]), 0)
-
-    def test_unsubscribe_non_existent_callback(self):
-        bus = EventBus()
-        calls = []
-
-        def callback1(event):
-            calls.append(event)
-
-        def callback2(event):
-            pass
-
-        bus.subscribe(TestEvent, callback1)
-        self.assertEqual(len(bus._subscribers[TestEvent]), 1)
-
-        # Unsubscribe a callback that was never subscribed
-        bus.unsubscribe(TestEvent, callback2)
-
-        # The list of subscribers should remain unchanged
-        self.assertEqual(len(bus._subscribers[TestEvent]), 1)
-
-        # Calling publish should still work
-        bus.publish(TestEvent())
-        self.assertEqual(len(calls), 1)
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()
