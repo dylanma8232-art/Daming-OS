@@ -104,6 +104,47 @@ class HardenedSQLiteManager:
             logger.warning(f"Failed to get item meta for {item_id}: {e}")
         return None
 
+    def get_items_meta(self, item_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+        """批量获取节点的元数据"""
+        if not item_ids:
+            return {}
+
+        try:
+            with closing(self._get_connection()) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='items'")
+                if not cursor.fetchone():
+                    return {}
+
+                # Use chunks of 999 to avoid SQLite's parameter limit
+                result = {}
+                chunk_size = 999
+                for i in range(0, len(item_ids), chunk_size):
+                    chunk = item_ids[i:i + chunk_size]
+                    placeholders = ",".join(["?"] * len(chunk))
+
+                    cursor.execute(
+                        f"SELECT item_id, importance, category, metadata_json FROM items WHERE item_id IN ({placeholders})",
+                        chunk
+                    )
+
+                    for row in cursor.fetchall():
+                        metadata = {}
+                        if "metadata_json" in row.keys() and row["metadata_json"]:
+                            try:
+                                metadata = json.loads(row["metadata_json"])
+                            except Exception as parse_e:
+                                logger.warning(f"Failed to parse metadata_json for {row['item_id']}: {parse_e}")
+                        result[row["item_id"]] = {
+                            "importance": row["importance"],
+                            "category": row["category"],
+                            "metadata": metadata
+                        }
+                return result
+        except Exception as e:
+            logger.warning(f"Failed to get items meta: {e}")
+        return {}
+
 def fts5_search(query: str, db_path: Optional[str] = None, top_k: int = 10) -> List[Dict[str, Any]]:
     """SQLite FTS5 稀疏关键字检索"""
     raw = Path(db_path or config.SQLITE_META_PATH)
