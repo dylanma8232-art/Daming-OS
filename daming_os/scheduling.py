@@ -295,7 +295,8 @@ class ConfigGuard:
     def check(self, config: Dict[str,Any]) -> bool:
         digest=hashlib.sha256(json.dumps(config,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
         previous=self.path.read_text().strip() if self.path.exists() else ""
-        temporary=self.path.with_suffix(self.path.suffix+".tmp")
-        temporary.write_text(digest+"\n")
-        os.replace(temporary,self.path)
+        if previous != digest:
+            temporary=self.path.with_suffix(self.path.suffix+".tmp")
+            temporary.write_text(digest+"\n")
+            os.replace(temporary,self.path)
         return bool(previous) and previous != digest
