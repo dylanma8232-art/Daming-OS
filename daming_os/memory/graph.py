@@ -37,7 +37,7 @@ class KnowledgeGraph:
         with self._transaction() as c:
             for _ in range(depth):
                 if not frontier: break
-                marks=','.join('?'*len(frontier)); rows=c.execute(f"SELECT source_node,target_node,link_type FROM wiki_edges WHERE source_node IN ({marks}) OR target_node IN ({marks})",tuple(frontier)*2).fetchall()
+                marks=','.join('?'*len(frontier)); rows=c.execute(f"SELECT source_node,target_node,link_type FROM wiki_edges WHERE source_node IN ({marks}) OR target_node IN ({marks})",tuple(frontier)*2).fetchall()  # nosec B608
                 frontier=set()
                 for source,target,relation in rows:
                     other=target if source in seen else source
