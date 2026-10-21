@@ -93,6 +93,10 @@ class QueryOptions:
     messages: Optional[List[Dict[str, Any]]] = None
     scope: Optional[MemoryScope] = None
 
+# Both Jules parameter-object names share the same retrieval contract.
+QueryContext = QueryOptions
+
+
 class MemorySystem:
     """
     Core Memory Engine implementing 3-Way RRF (Reciprocal Rank Fusion).
@@ -127,12 +131,16 @@ class MemorySystem:
     def close(self) -> None:
         bus.unsubscribe(EvolutionCompletedEvent, self._on_evolution_completed)
 
-    def query(self, text: str, options: Optional[QueryOptions] = None) -> List[Dict[str, Any]]:
+    def query(self, text: str, options: Optional[QueryOptions] = None, *,
+              context: Optional[QueryContext] = None) -> List[Dict[str, Any]]:
         """
         Primary interface for agent retrieval.
         Attempts L1/L2 cache first, then performs 3-Way RRF fallback.
         """
-        options = options or QueryOptions()
+        if options is not None and context is not None:
+            raise ValueError("Pass either options or context, not both")
+        options = options if options is not None else context
+        options = options if options is not None else QueryOptions()
         query_vector = options.query_vector
         top_k = options.top_k
         max_chars = options.max_chars
