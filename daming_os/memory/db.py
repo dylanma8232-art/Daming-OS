@@ -1,9 +1,12 @@
 import sqlite3
 import json
 import logging
+import threading
 from contextlib import closing
 from pathlib import Path
 from typing import Dict, List, Any, Optional
+
+_local = threading.local()
 
 from ..config import config
 
@@ -232,19 +235,29 @@ def queue_incoming_memory(session_key: str, memory_data: Dict[str, Any], db_path
     """无锁单向写入: 将新记忆存入 incoming_memories 队列"""
     raw = Path(db_path or config.SQLITE_META_PATH)
     db_path = str(raw if raw.is_absolute() else Path(config.WORKSPACE_ROOT) / raw)
+
+    if not hasattr(_local, 'conns'):
+        _local.conns = {}
+
+    conn = _local.conns.get(db_path)
+
     try:
-        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(db_path)
-        conn.execute('PRAGMA journal_mode=WAL')
+        if conn is None:
+            Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+            conn = sqlite3.connect(db_path)
+            conn.execute('PRAGMA journal_mode=WAL')
+            cursor = conn.cursor()
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS incoming_memories (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_key TEXT,
+                    data_json TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            _local.conns[db_path] = conn
+
         cursor = conn.cursor()
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS incoming_memories (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_key TEXT,
-                data_json TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
         cursor.execute(
             'INSERT INTO incoming_memories (session_key, data_json) VALUES (?, ?)',
             (session_key, json.dumps(memory_data, ensure_ascii=False))
@@ -252,8 +265,10 @@ def queue_incoming_memory(session_key: str, memory_data: Dict[str, Any], db_path
         conn.commit()
         return True
     except Exception as e:
+        if 'conn' in locals() and conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         logger.error(f"Failed to queue memory: {e}")
         return False
-    finally:
-        if 'conn' in locals():
-            conn.close()
