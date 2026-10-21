@@ -208,9 +208,12 @@ class MemorySystem:
         bypass = []
         normal = []
 
+        item_ids = [item.get("id", "") for item in results if item.get("id")]
+        meta_dict = self.sqlite_manager.get_items_meta(item_ids)
+
         for item in results:
             item_id = item.get("id", "")
-            meta = self.sqlite_manager.get_item_meta(item_id)
+            meta = meta_dict.get(item_id)
             # Legacy records without scope metadata are intentionally invisible
             # to a tenant-scoped query; leaking an old unscoped record is worse
             # than requiring one migration/consolidation pass.
