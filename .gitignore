@@ -20,3 +20,4 @@ __pycache__/
 *secret*
 *token*
 *key*.json
+test_dir/
