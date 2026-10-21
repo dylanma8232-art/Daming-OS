@@ -4,7 +4,6 @@ Agent frameworks do not share one hook API.  This bridge deliberately accepts a
 small registrar function instead of importing a particular framework: LangGraph,
 an in-house agent, or any hook-capable runner can register the same callbacks.
 """
-from __future__ import annotations
 
 from typing import Any, Callable, Dict, Optional
 
