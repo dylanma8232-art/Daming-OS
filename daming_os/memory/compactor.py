@@ -52,82 +52,87 @@ class MessageCompactor:
         or truncates them, or uses LLM to compress them.
         """
         if isinstance(messages, str):
-            curr_tokens = self.estimate_tokens(messages)
-            if curr_tokens <= max_tokens:
-                return messages
-            
-            # Use LLM to compress the text
-            prompt = f"Please compress the following text to fit within {max_tokens} tokens while retaining all critical information, core decisions, and context:\n\n{messages}"
-            try:
-                compressed = self.llm_provider.complete([
-                    {"role": "system", "content": "You are a highly efficient text compressor. Your goal is to rewrite the input text to be as concise as possible without losing key meaning or specific data."},
-                    {"role": "user", "content": prompt}
-                ])
-                return compressed
-            except Exception as e:
-                logger.error(f"Failed to compress text using LLM: {e}. Falling back to character truncation.")
-                # Fallback: simple character truncation based on estimation
-                ratio = max_tokens / max(1, curr_tokens)
-                keep_chars = int(len(messages) * ratio)
-                # Do not append a marker here: the marker itself can push the
-                # result back over the caller's strict token budget.
-                return messages[:keep_chars]
-
+            return self._compact_str(messages, max_tokens)
         elif isinstance(messages, list):
-            # List of messages/items. Let's compact by filtering by information density or trimming.
-            # We first estimate total tokens
-            total_tokens = 0
-            item_tokens = []
-            for msg in messages:
-                content = msg.get("content", "")
-                tokens = self.estimate_tokens(content)
-                total_tokens += tokens
-                item_tokens.append(tokens)
-            
-            if total_tokens <= max_tokens:
-                return messages
+            return self._compact_list(messages, max_tokens)
 
-            # If we need to compact, we can first filter items by their score/importance (if available) or density
-            # Let's calculate info density for each item
-            scored_items = []
-            for i, msg in enumerate(messages):
-                content = msg.get("content", "")
-                score = msg.get("final_score", msg.get("score", msg.get("rrf_score", 0.5)))
-                density = self.calculate_info_density(content, score)
-                scored_items.append({
-                    "index": i,
-                    "msg": msg,
-                    "density": density,
-                    "tokens": item_tokens[i]
-                })
-
-            # Sort by density descending
-            scored_items.sort(key=lambda x: x["density"], reverse=True)
-
-            selected = []
-            accumulated_tokens = 0
-            # Keep items with highest density until max_tokens is reached
-            for item in scored_items:
-                if accumulated_tokens + item["tokens"] <= max_tokens:
-                    selected.append(item)
-                    accumulated_tokens += item["tokens"]
-                else:
-                    # Try to compress the individual item to fit the remaining space
-                    remaining_tokens = max_tokens - accumulated_tokens
-                    if remaining_tokens > 10:
-                        content = item["msg"].get("content", "")
-                        comp_content = self.compact_sync(content, remaining_tokens)
-                        new_msg = dict(item["msg"])
-                        new_msg["content"] = comp_content
-                        # Update tokens
-                        item["tokens"] = self.estimate_tokens(comp_content)
-                        if accumulated_tokens + item["tokens"] <= max_tokens:
-                            selected.append(item)
-                            accumulated_tokens += item["tokens"]
-                    break
-
-            # Restore original order
-            selected.sort(key=lambda x: x["index"])
-            return [item["msg"] for item in selected]
-        
         return messages
+
+    def _compact_str(self, text: str, max_tokens: int) -> str:
+        curr_tokens = self.estimate_tokens(text)
+        if curr_tokens <= max_tokens:
+            return text
+
+        # Use LLM to compress the text
+        prompt = f"Please compress the following text to fit within {max_tokens} tokens while retaining all critical information, core decisions, and context:\n\n{text}"
+        try:
+            compressed = self.llm_provider.complete([
+                {"role": "system", "content": "You are a highly efficient text compressor. Your goal is to rewrite the input text to be as concise as possible without losing key meaning or specific data."},
+                {"role": "user", "content": prompt}
+            ])
+            return compressed
+        except Exception as e:
+            logger.error(f"Failed to compress text using LLM: {e}. Falling back to character truncation.")
+            # Fallback: simple character truncation based on estimation
+            ratio = max_tokens / max(1, curr_tokens)
+            keep_chars = int(len(text) * ratio)
+            # Do not append a marker here: the marker itself can push the
+            # result back over the caller's strict token budget.
+            return text[:keep_chars]
+
+    def _compact_list(self, messages: List[Dict[str, Any]], max_tokens: int) -> List[Dict[str, Any]]:
+        # List of messages/items. Let's compact by filtering by information density or trimming.
+        # We first estimate total tokens
+        total_tokens = 0
+        item_tokens = []
+        for msg in messages:
+            content = msg.get("content", "")
+            tokens = self.estimate_tokens(content)
+            total_tokens += tokens
+            item_tokens.append(tokens)
+
+        if total_tokens <= max_tokens:
+            return messages
+
+        # If we need to compact, we can first filter items by their score/importance (if available) or density
+        # Let's calculate info density for each item
+        scored_items = []
+        for i, msg in enumerate(messages):
+            content = msg.get("content", "")
+            score = msg.get("final_score", msg.get("score", msg.get("rrf_score", 0.5)))
+            density = self.calculate_info_density(content, score)
+            scored_items.append({
+                "index": i,
+                "msg": msg,
+                "density": density,
+                "tokens": item_tokens[i]
+            })
+
+        # Sort by density descending
+        scored_items.sort(key=lambda x: x["density"], reverse=True)
+
+        selected = []
+        accumulated_tokens = 0
+        # Keep items with highest density until max_tokens is reached
+        for item in scored_items:
+            if accumulated_tokens + item["tokens"] <= max_tokens:
+                selected.append(item)
+                accumulated_tokens += item["tokens"]
+            else:
+                # Try to compress the individual item to fit the remaining space
+                remaining_tokens = max_tokens - accumulated_tokens
+                if remaining_tokens > 10:
+                    content = item["msg"].get("content", "")
+                    comp_content = self.compact_sync(content, remaining_tokens)
+                    new_msg = dict(item["msg"])
+                    new_msg["content"] = comp_content
+                    # Update tokens
+                    item["tokens"] = self.estimate_tokens(comp_content)
+                    if accumulated_tokens + item["tokens"] <= max_tokens:
+                        selected.append(item)
+                        accumulated_tokens += item["tokens"]
+                break
+
+        # Restore original order
+        selected.sort(key=lambda x: x["index"])
+        return [item["msg"] for item in selected]
