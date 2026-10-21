@@ -1,11 +1,13 @@
+from dataclasses import dataclass, field
 import logging
 import collections
+import time
 from typing import List, Dict, Any, Optional
 
 from ..config import config
 from ..events import bus, EvolutionCompletedEvent
 from .cache import HardenedSemanticCache
-from .db import HardenedSQLiteManager, get_markdown_content, queue_incoming_memory
+from .db import HardenedSQLiteManager, get_markdown_content, get_markdown_contents, queue_incoming_memory
 from .hot import SessionStateMachine
 from .warm import vector_search
 from .cold import sparse_search
@@ -34,9 +36,22 @@ def rrf_fusion(ranked_lists: List[List[Dict[str, Any]]], k: int = 10) -> List[Di
 
 class SpreadingActivationTraverser:
     """Spreading Activation Traverser for Graph Search"""
+    def __init__(self, cache_ttl: float = 60.0):
+        self._adj_list_cache = None
+        self._cache_time = 0.0
+        self._cache_ttl = cache_ttl
+        self._db_path = None
+
     def traverse(self, seed_ids: List[str], db_path: str) -> List[Dict[str, Any]]:
         manager = HardenedSQLiteManager(db_path)
-        adj_list = manager.get_adjacency_list()
+
+        current_time = time.time()
+        if self._adj_list_cache is None or self._db_path != db_path or (current_time - self._cache_time) > self._cache_ttl:
+            self._adj_list_cache = manager.get_adjacency_list()
+            self._cache_time = current_time
+            self._db_path = db_path
+
+        adj_list = self._adj_list_cache
         
         beta = 0.5
         gamma = 0.1
@@ -68,6 +83,15 @@ class SpreadingActivationTraverser:
                             queue.append((target, new_activation, depth + 1))
         
         return sorted([{"id": k, "score": v, "source": "graph"} for k, v in results.items() if k not in seed_ids], key=lambda x: -x["score"])
+
+
+@dataclass
+class QueryOptions:
+    query_vector: Optional[List[float]] = None
+    top_k: int = 3
+    max_chars: int = 1000
+    messages: Optional[List[Dict[str, Any]]] = None
+    scope: Optional[MemoryScope] = None
 
 class MemorySystem:
     """
@@ -103,13 +127,18 @@ class MemorySystem:
     def close(self) -> None:
         bus.unsubscribe(EvolutionCompletedEvent, self._on_evolution_completed)
 
-    def query(self, text: str, query_vector: Optional[List[float]] = None, top_k: int = 3,
-              max_chars: int = 1000, messages: Optional[List[Dict[str, Any]]] = None,
-              scope: Optional[MemoryScope] = None) -> List[Dict[str, Any]]:
+    def query(self, text: str, options: Optional[QueryOptions] = None) -> List[Dict[str, Any]]:
         """
         Primary interface for agent retrieval.
         Attempts L1/L2 cache first, then performs 3-Way RRF fallback.
         """
+        options = options or QueryOptions()
+        query_vector = options.query_vector
+        top_k = options.top_k
+        max_chars = options.max_chars
+        messages = options.messages
+        scope = options.scope
+
         # 针对多轮会话追问进行前置上下文拼接，消除指代失忆
         recall_query = text
         if messages and isinstance(messages, list):
@@ -171,8 +200,11 @@ class MemorySystem:
         fused = rrf_fusion([warm_results, graph_results, cold_results], k=10)
         
         # Hydrate with markdown content
+        fused_ids = [res["id"] for res in fused]
+        contents_dict = get_markdown_contents(fused_ids, self.sqlite_manager)
+
         for res in fused:
-            content = get_markdown_content(res["id"], self.sqlite_manager)
+            content = contents_dict.get(res["id"])
             if content:
                 if len(content) > max_chars:
                     res["content"] = content[:max_chars] + "\n\n... [Content Truncated due to length limit]"
@@ -191,9 +223,12 @@ class MemorySystem:
         bypass = []
         normal = []
 
+        item_ids = [item.get("id", "") for item in results if item.get("id")]
+        meta_dict = self.sqlite_manager.get_items_meta(item_ids)
+
         for item in results:
             item_id = item.get("id", "")
-            meta = self.sqlite_manager.get_item_meta(item_id)
+            meta = meta_dict.get(item_id)
             # Legacy records without scope metadata are intentionally invisible
             # to a tenant-scoped query; leaking an old unscoped record is worse
             # than requiring one migration/consolidation pass.

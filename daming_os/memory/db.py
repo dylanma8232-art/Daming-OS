@@ -1,11 +1,34 @@
 import sqlite3
 import json
 import logging
+import threading
 from contextlib import closing
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
+_local = threading.local()
+
 from ..config import config
+
+_local = threading.local()
+
+def _get_fts_connection(db_path: str) -> sqlite3.Connection:
+    """Thread-local connection cache for FTS search to eliminate DDL latency."""
+    if not hasattr(_local, "fts_conns"):
+        _local.fts_conns = {}
+
+    if db_path not in _local.fts_conns:
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(db_path)
+        # Ensure FTS5 table exists only once per connection setup
+        conn.execute('''
+            CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
+                item_id, content
+            )
+        ''')
+        _local.fts_conns[db_path] = conn
+
+    return _local.fts_conns[db_path]
 
 logger = logging.getLogger("daming_os.memory.db")
 
@@ -104,21 +127,54 @@ class HardenedSQLiteManager:
             logger.warning(f"Failed to get item meta for {item_id}: {e}")
         return None
 
+    def get_items_meta(self, item_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+        """批量获取节点的元数据"""
+        if not item_ids:
+            return {}
+
+        try:
+            with closing(self._get_connection()) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='items'")
+                if not cursor.fetchone():
+                    return {}
+
+                # Use chunks of 999 to avoid SQLite's parameter limit
+                result = {}
+                chunk_size = 999
+                for i in range(0, len(item_ids), chunk_size):
+                    chunk = item_ids[i:i + chunk_size]
+                    placeholders = ",".join(["?"] * len(chunk))
+
+                    cursor.execute(
+                        f"SELECT item_id, importance, category, metadata_json FROM items WHERE item_id IN ({placeholders})",
+                        chunk
+                    )
+
+                    for row in cursor.fetchall():
+                        metadata = {}
+                        if "metadata_json" in row.keys() and row["metadata_json"]:
+                            try:
+                                metadata = json.loads(row["metadata_json"])
+                            except Exception as parse_e:
+                                logger.warning(f"Failed to parse metadata_json for {row['item_id']}: {parse_e}")
+                        result[row["item_id"]] = {
+                            "importance": row["importance"],
+                            "category": row["category"],
+                            "metadata": metadata
+                        }
+                return result
+        except Exception as e:
+            logger.warning(f"Failed to get items meta: {e}")
+        return {}
+
 def fts5_search(query: str, db_path: Optional[str] = None, top_k: int = 10) -> List[Dict[str, Any]]:
     """SQLite FTS5 稀疏关键字检索"""
     raw = Path(db_path or config.SQLITE_META_PATH)
     db_path = str(raw if raw.is_absolute() else Path(config.WORKSPACE_ROOT) / raw)
     try:
-        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(db_path)
+        conn = _get_fts_connection(db_path)
         cursor = conn.cursor()
-        
-        # 确保 FTS5 表存在
-        cursor.execute('''
-            CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
-                item_id, content
-            )
-        ''')
         
         # 清洗查询文本，转换为 FTS5 MATCH 语法
         clean_query = ''.join(c if c.isalnum() else ' ' for c in query)
@@ -144,9 +200,6 @@ def fts5_search(query: str, db_path: Optional[str] = None, top_k: int = 10) -> L
     except Exception as e:
         logger.warning(f"FTS5 search failed: {e}")
         return []
-    finally:
-        if 'conn' in locals():
-            conn.close()
 
 def get_markdown_content(item_id: str, sqlite_manager: HardenedSQLiteManager) -> Optional[str]:
     """Retrieves physical content for an item"""
@@ -165,23 +218,55 @@ def get_markdown_content(item_id: str, sqlite_manager: HardenedSQLiteManager) ->
         logger.warning(f"Failed to fetch content for {item_id}: {e}")
     return None
 
+def get_markdown_contents(item_ids: List[str], sqlite_manager: HardenedSQLiteManager) -> Dict[str, str]:
+    """Retrieves physical content for multiple items"""
+    contents = {}
+    if not item_ids:
+        return contents
+
+    try:
+        with closing(sqlite_manager._get_connection()) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='items'")
+            if not cursor.fetchone():
+                return contents
+
+            placeholders = ','.join(['?'] * len(item_ids))
+            query = f"SELECT item_id, content FROM items WHERE item_id IN ({placeholders})"
+            cursor.execute(query, item_ids)
+            for row in cursor.fetchall():
+                contents[row["item_id"]] = row["content"]
+    except Exception as e:
+        logger.warning(f"Failed to fetch content for multiple items: {e}")
+    return contents
+
 def queue_incoming_memory(session_key: str, memory_data: Dict[str, Any], db_path: Optional[str] = None) -> bool:
     """无锁单向写入: 将新记忆存入 incoming_memories 队列"""
     raw = Path(db_path or config.SQLITE_META_PATH)
     db_path = str(raw if raw.is_absolute() else Path(config.WORKSPACE_ROOT) / raw)
+
+    if not hasattr(_local, 'conns'):
+        _local.conns = {}
+
+    conn = _local.conns.get(db_path)
+
     try:
-        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(db_path)
-        conn.execute('PRAGMA journal_mode=WAL')
+        if conn is None:
+            Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+            conn = sqlite3.connect(db_path)
+            conn.execute('PRAGMA journal_mode=WAL')
+            cursor = conn.cursor()
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS incoming_memories (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_key TEXT,
+                    data_json TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            _local.conns[db_path] = conn
+
         cursor = conn.cursor()
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS incoming_memories (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_key TEXT,
-                data_json TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
         cursor.execute(
             'INSERT INTO incoming_memories (session_key, data_json) VALUES (?, ?)',
             (session_key, json.dumps(memory_data, ensure_ascii=False))
@@ -189,8 +274,10 @@ def queue_incoming_memory(session_key: str, memory_data: Dict[str, Any], db_path
         conn.commit()
         return True
     except Exception as e:
+        if 'conn' in locals() and conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         logger.error(f"Failed to queue memory: {e}")
         return False
-    finally:
-        if 'conn' in locals():
-            conn.close()
