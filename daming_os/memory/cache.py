@@ -41,6 +41,8 @@ class HardenedSemanticCache:
         self.hit_history = collections.deque(maxlen=hr_window_size)
         
         self.cache_file = cache_file
+        self._in_memory_state = None
+        self._last_mtime = 0
         
         # Initialize file if not exists
         if not os.path.exists(self.cache_file):
@@ -50,10 +52,17 @@ class HardenedSemanticCache:
         if not os.path.exists(self.cache_file):
             return {"l1_cache": {}, "l2_cache": {}}
         try:
+            mtime = os.path.getmtime(self.cache_file)
+            if self._in_memory_state is not None and mtime == self._last_mtime:
+                return self._in_memory_state
+
             with open(self.cache_file, 'r', encoding='utf-8') as f:
                 fcntl.flock(f, fcntl.LOCK_SH)
                 try:
-                    return json.load(f)
+                    state = json.load(f)
+                    self._in_memory_state = state
+                    self._last_mtime = mtime
+                    return state
                 finally:
                     fcntl.flock(f, fcntl.LOCK_UN)
         except Exception as e:
@@ -68,6 +77,8 @@ class HardenedSemanticCache:
                     json.dump(state, f, ensure_ascii=False, indent=2)
                 finally:
                     fcntl.flock(f, fcntl.LOCK_UN)
+            self._in_memory_state = state
+            self._last_mtime = os.path.getmtime(self.cache_file)
         except Exception as e:
             logger.error(f"Failed to save cache: {e}")
 

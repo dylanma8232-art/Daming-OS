@@ -4,7 +4,6 @@ Agent frameworks do not share one hook API.  This bridge deliberately accepts a
 small registrar function instead of importing a particular framework: LangGraph,
 an in-house agent, or any hook-capable runner can register the same callbacks.
 """
-from __future__ import annotations
 
 from typing import Any, Callable, Dict, Optional
 
@@ -57,7 +56,7 @@ class DamingHookBridge:
             compacted = self.adapter.compact_context(context)
             payload["daming_compacted_messages"] = compacted
             # Preserve the original generic-hook behaviour for empty hosts,
-            # while non-empty chat histories remain host-owned and intact.
+            # non-empty chat histories remain host-owned and intact.
             if not messages:
                 payload["messages"] = compacted
         if self.skill_context_callback is not None:

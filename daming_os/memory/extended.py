@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import sqlite3
 import time
 from datetime import datetime, timezone
@@ -15,15 +14,26 @@ from .runtime import HotMemoryJournal
 
 
 class FileTracker:
-    def __init__(self, path: str): self.path = Path(path); self.path.parent.mkdir(parents=True, exist_ok=True)
+    def __init__(self, path: str):
+        self.path = Path(path); self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._cache: Dict[str, tuple[tuple[int, int, int, int, int], str]] = {}
+    def _hash(self, p: Path) -> str:
+        s = p.stat()
+        k = (s.st_mtime_ns, s.st_ctime_ns, s.st_size, s.st_ino, s.st_dev)
+        path_str = str(p)
+        if path_str in self._cache and self._cache[path_str][0] == k:
+            return self._cache[path_str][1]
+        h = hashlib.sha256(p.read_bytes()).hexdigest()
+        self._cache[path_str] = (k, h)
+        return h
     def snapshot(self, files: Iterable[str]) -> Dict[str, str]:
-        state = {str(Path(item)): hashlib.sha256(Path(item).read_bytes()).hexdigest()
+        state = {str(Path(item)): self._hash(Path(item))
                  for item in files if Path(item).is_file()}
         self.path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
         return state
     def changed(self, files: Iterable[str]) -> List[str]:
         old = json.loads(self.path.read_text(encoding="utf-8")) if self.path.exists() else {}
-        current = {str(Path(item)): hashlib.sha256(Path(item).read_bytes()).hexdigest()
+        current = {str(Path(item)): self._hash(Path(item))
                    for item in files if Path(item).is_file()}
         return sorted(key for key, value in current.items() if old.get(key) != value)
 

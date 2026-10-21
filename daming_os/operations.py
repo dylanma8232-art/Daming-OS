@@ -3,7 +3,7 @@ from __future__ import annotations
 import json, shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict, Iterable
 
 class HealthMonitor:
     """Runs portable probes for storage, scheduler, rules, config and security."""
