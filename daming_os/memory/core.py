@@ -5,7 +5,7 @@ from typing import List, Dict, Any, Optional
 from ..config import config
 from ..events import bus, EvolutionCompletedEvent
 from .cache import HardenedSemanticCache
-from .db import HardenedSQLiteManager, get_markdown_content, queue_incoming_memory
+from .db import HardenedSQLiteManager, get_markdown_content, get_markdown_contents, queue_incoming_memory
 from .hot import SessionStateMachine
 from .warm import vector_search
 from .cold import sparse_search
@@ -171,8 +171,11 @@ class MemorySystem:
         fused = rrf_fusion([warm_results, graph_results, cold_results], k=10)
         
         # Hydrate with markdown content
+        fused_ids = [res["id"] for res in fused]
+        contents_dict = get_markdown_contents(fused_ids, self.sqlite_manager)
+
         for res in fused:
-            content = get_markdown_content(res["id"], self.sqlite_manager)
+            content = contents_dict.get(res["id"])
             if content:
                 if len(content) > max_chars:
                     res["content"] = content[:max_chars] + "\n\n... [Content Truncated due to length limit]"

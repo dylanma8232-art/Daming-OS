@@ -165,6 +165,28 @@ def get_markdown_content(item_id: str, sqlite_manager: HardenedSQLiteManager) ->
         logger.warning(f"Failed to fetch content for {item_id}: {e}")
     return None
 
+def get_markdown_contents(item_ids: List[str], sqlite_manager: HardenedSQLiteManager) -> Dict[str, str]:
+    """Retrieves physical content for multiple items"""
+    contents = {}
+    if not item_ids:
+        return contents
+
+    try:
+        with closing(sqlite_manager._get_connection()) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='items'")
+            if not cursor.fetchone():
+                return contents
+
+            placeholders = ','.join(['?'] * len(item_ids))
+            query = f"SELECT item_id, content FROM items WHERE item_id IN ({placeholders})"
+            cursor.execute(query, item_ids)
+            for row in cursor.fetchall():
+                contents[row["item_id"]] = row["content"]
+    except Exception as e:
+        logger.warning(f"Failed to fetch content for multiple items: {e}")
+    return contents
+
 def queue_incoming_memory(session_key: str, memory_data: Dict[str, Any], db_path: Optional[str] = None) -> bool:
     """无锁单向写入: 将新记忆存入 incoming_memories 队列"""
     raw = Path(db_path or config.SQLITE_META_PATH)
