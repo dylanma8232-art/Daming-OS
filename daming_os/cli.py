@@ -12,7 +12,7 @@ import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional, Tuple, Union
 
 from .memory.migration import MemoryMigrator
 
@@ -496,20 +496,25 @@ def doctor(workspace: str, host_dir: str = "") -> Dict[str, Any]:
     }
 
 
-def status(workspace: str) -> Dict[str, Any]:
-    root = Path(workspace).resolve()
+def _load_scheduler_state(root: Path) -> Dict[str, Any]:
     state_path = root / ".daming-os" / "scheduler-state.json"
     try:
-        state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
+        return json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
     except (OSError, ValueError, json.JSONDecodeError):
-        state = {"error": "scheduler state is unreadable"}
+        return {"error": "scheduler state is unreadable"}
+
+
+def _load_manifest(root: Path) -> Dict[str, Any]:
     manifest_path = root / ".daming-os" / "install.json"
-    manifest = {}
     if manifest_path.exists():
         try:
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            return json.loads(manifest_path.read_text(encoding="utf-8"))
         except (OSError, ValueError, json.JSONDecodeError):
-            manifest = {"error": "install manifest is unreadable"}
+            return {"error": "install manifest is unreadable"}
+    return {}
+
+
+def _load_task_runs(root: Path) -> Tuple[Dict[str, Any], Dict[str, Dict[str, Any]]]:
     runs_path = root / "memory" / "maintenance" / "task-runs.jsonl"
     latest_run: Dict[str, Any] = {}
     latest_runs: Dict[str, Dict[str, Any]] = {}
@@ -524,11 +529,11 @@ def status(workspace: str) -> Dict[str, Any]:
         except (OSError, ValueError, json.JSONDecodeError):
             latest_run = {"error": "task history is unreadable"}
             latest_runs = {}
-    config = _load_config(root)
-    runtime = config.get("runtime", {}) if isinstance(config.get("runtime"), dict) else {}
-    digest_enabled = bool(runtime.get("daily_digest_enabled", runtime.get("reviews_enabled", False)))
-    scheduler_jobs = state.get("jobs", {}) if isinstance(state, dict) and isinstance(state.get("jobs"), dict) else {}
+    return latest_run, latest_runs
 
+
+def _build_services_status(latest_runs: Dict[str, Dict[str, Any]], scheduler_jobs: Dict[str, Any],
+                           digest_enabled: bool, runtime: Dict[str, Any]) -> Dict[str, Any]:
     def last_run(name: str) -> Optional[str]:
         value = latest_runs.get(name, {}).get("at")
         return str(value) if value else None
@@ -543,7 +548,7 @@ def status(workspace: str) -> Dict[str, Any]:
         except (OSError, TypeError, ValueError):
             return None
 
-    services = {
+    return {
         "core_memory": {
             "enabled": True,
             "trigger": "before_turn recall + after_turn capture",
@@ -600,6 +605,21 @@ def status(workspace: str) -> Dict[str, Any]:
             "note": "stale-session check only",
         },
     }
+
+
+def status(workspace: str) -> Dict[str, Any]:
+    root = Path(workspace).resolve()
+    state = _load_scheduler_state(root)
+    manifest = _load_manifest(root)
+    latest_run, latest_runs = _load_task_runs(root)
+
+    config = _load_config(root)
+    runtime = config.get("runtime", {}) if isinstance(config.get("runtime"), dict) else {}
+    digest_enabled = bool(runtime.get("daily_digest_enabled", runtime.get("reviews_enabled", False)))
+    scheduler_jobs = state.get("jobs", {}) if isinstance(state, dict) and isinstance(state.get("jobs"), dict) else {}
+
+    services = _build_services_status(latest_runs, scheduler_jobs, digest_enabled, runtime)
+
     return {"workspace": str(root), "agent_id": runtime.get("agent_id"),
             "layout": MemoryMigrator(str(root)).verify(),
             "config": config, "install": manifest, "services": services,
