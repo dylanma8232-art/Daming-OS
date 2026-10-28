@@ -199,18 +199,45 @@ class BitableSynchronizer:
             if not connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='items'").fetchone():
                 return
             connection.execute("CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(item_id, content)")
+
+            insert_items = []
+            fts_items = []
+
             for identifier, record in records.items():
                 content = str(record.get("content") or record.get("title") or "").strip()
                 if not content:
                     continue
-                exists = connection.execute("SELECT 1 FROM items WHERE item_id=?", (identifier,)).fetchone()
-                if not exists:
-                    connection.execute("INSERT INTO items(item_id,title,content,importance,category,created_at,metadata_json) VALUES(?,?,?,?,?,?,?)",
-                                       (identifier, str(record.get("title", content[:80])), content,
-                                        float(record.get("importance", .5)), str(record.get("category", "bitable")),
-                                        str(record.get("created_at", _utc_now())),
-                                        json.dumps(record.get("metadata", {}), ensure_ascii=False)))
-                    connection.execute("INSERT INTO memory_fts(item_id,content) VALUES(?,?)", (identifier, content))
+
+                insert_items.append((
+                    identifier,
+                    str(record.get("title", content[:80])),
+                    content,
+                    float(record.get("importance", .5)),
+                    str(record.get("category", "bitable")),
+                    str(record.get("created_at", _utc_now())),
+                    json.dumps(record.get("metadata", {}), ensure_ascii=False)
+                ))
+                fts_items.append((identifier, content))
+
+            if insert_items:
+                identifiers = [row[0] for row in insert_items]
+                existing_ids = set()
+                chunk_size = 900
+                for i in range(0, len(identifiers), chunk_size):
+                    chunk = identifiers[i:i+chunk_size]
+                    placeholders = ",".join("?" * len(chunk))
+                    # nosec B608
+                    cursor = connection.execute(f"SELECT item_id FROM items WHERE item_id IN ({placeholders})", chunk)
+                    existing_ids.update(row[0] for row in cursor.fetchall())
+
+                final_insert_items = [item for item in insert_items if item[0] not in existing_ids]
+                final_fts_items = [item for item in fts_items if item[0] not in existing_ids]
+
+                if final_insert_items:
+                    connection.executemany("INSERT INTO items(item_id,title,content,importance,category,created_at,metadata_json) VALUES(?,?,?,?,?,?,?)", final_insert_items)
+                    connection.executemany("INSERT INTO memory_fts(item_id,content) VALUES(?,?)", final_fts_items)
+
+            connection.commit()
 
 
 class SkillUsageLedger:
