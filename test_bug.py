@@ -1,6 +1,3 @@
-import sys
-import os
-
 from daming_os.memory.compactor import MessageCompactor
 
 compactor = MessageCompactor()
