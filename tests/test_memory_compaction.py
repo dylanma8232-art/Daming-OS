@@ -2,6 +2,7 @@ import unittest
 import sys
 import os
 import re
+from unittest.mock import MagicMock
 
 # Add the project directory to sys.path to allow imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -40,6 +41,24 @@ class TestMemoryCompaction(unittest.TestCase):
         compacted = self.compactor.compact_sync(messages, max_tokens=20)
         self.assertLess(len(compacted), len(messages))
         self.assertGreater(len(compacted), 0)
+
+    def test_compact_str_llm_exception_fallback(self):
+        text = "This is a long string that definitely needs to be truncated because it exceeds the maximum token limit set."
+        max_tokens = 5
+        curr_tokens = self.compactor.estimate_tokens(text)
+
+        # Patch the LLM provider to raise an exception
+        self.compactor.llm_provider.complete = MagicMock(side_effect=Exception("LLM API Error"))
+
+        compacted = self.compactor.compact_sync(text, max_tokens)
+
+        # Calculate expected fallback truncation
+        ratio = max_tokens / max(1, curr_tokens)
+        keep_chars = int(len(text) * ratio)
+        expected_text = text[:keep_chars]
+
+        self.assertEqual(compacted, expected_text)
+        self.assertTrue(self.compactor.llm_provider.complete.called)
 
     def test_middleware_regex_clean(self):
         agent_input = "User input here.\n<MemoryHint>\n[vector ID:123] Old memory context here...\n</MemoryHint>\nAnother query part."
