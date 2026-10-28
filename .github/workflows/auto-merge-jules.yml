@@ -12,6 +12,12 @@ jobs:
   auto-merge:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout main repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
       - name: Check if PR is created by Jules
         id: check_jules
         run: |
@@ -41,3 +47,29 @@ jobs:
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Record Iteration in CHANGELOG.md
+        if: steps.check_jules.outputs.is_jules == 'true'
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git pull origin main
+          DATE=$(date -u +"%Y-%m-%d %H:%M")
+          ENTRY="### [$DATE UTC] PR #${{ github.event.pull_request.number }}: ${{ github.event.pull_request.title }}\n- **PR 链接**: ${{ github.event.pull_request.html_url }}\n"
+          python3 -c "
+import os
+entry = '''### [$DATE UTC] PR #${{ github.event.pull_request.number }}: ${{ github.event.pull_request.title }}\n- **PR 链接**: ${{ github.event.pull_request.html_url }}\n\n'''
+if os.path.exists('CHANGELOG.md'):
+    with open('CHANGELOG.md', 'r', encoding='utf-8') as f:
+        content = f.read()
+    if '---' in content:
+        parts = content.split('---', 1)
+        new_content = parts[0] + '---\n\n' + entry + parts[1].lstrip()
+    else:
+        new_content = entry + content
+    with open('CHANGELOG.md', 'w', encoding='utf-8') as f:
+        f.write(new_content)
+"
+          git add CHANGELOG.md
+          git commit -m "docs(changelog): record PR #${{ github.event.pull_request.number }} auto-merge" || true
+          git push origin main || true
