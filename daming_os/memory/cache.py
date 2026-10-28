@@ -126,10 +126,11 @@ class HardenedSemanticCache:
         best_match_key = None
         best_similarity = -1.0
         
+        norm_q = math.sqrt(sum(a * a for a in query_vector))
+
         for key, entry in l2_cache.items():
             cache_vector = entry["vector"]
             dot_product = sum(a * b for a, b in zip(query_vector, cache_vector))
-            norm_q = math.sqrt(sum(a * a for a in query_vector))
             norm_c = math.sqrt(sum(b * b for b in cache_vector))
             if norm_q > 0.0 and norm_c > 0.0:
                 similarity = dot_product / (norm_q * norm_c)
