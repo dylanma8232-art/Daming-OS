@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import re
 from typing import Dict, Any
 
 logger = logging.getLogger("daming_os.memory.hot")
@@ -15,6 +16,10 @@ class SessionStateMachine:
         os.makedirs(self.session_dir, exist_ok=True)
 
     def write_memory(self, session_key: str, data: Dict[str, Any]) -> bool:
+        if not re.match(r"^[a-zA-Z0-9_-]+$", session_key):
+            logger.error(f"Invalid session_key: {session_key}")
+            return False
+
         tmp_path = os.path.join(self.session_dir, f"hot_memory_{session_key}.tmp")
         target_path = os.path.join(self.session_dir, f"hot_memory_{session_key}.json")
         try:
@@ -27,6 +32,10 @@ class SessionStateMachine:
             return False
 
     def read_memory(self, session_key: str) -> Dict[str, Any]:
+        if not re.match(r"^[a-zA-Z0-9_-]+$", session_key):
+            logger.error(f"Invalid session_key: {session_key}")
+            return {}
+
         target_path = os.path.join(self.session_dir, f"hot_memory_{session_key}.json")
         if not os.path.exists(target_path):
             return {}
