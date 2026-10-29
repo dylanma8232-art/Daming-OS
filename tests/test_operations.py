@@ -2,8 +2,24 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from daming_os.operations import ArchiveStore
+from daming_os.operations import ArchiveStore, HealthMonitor
 
+
+class TestHealthMonitor(unittest.TestCase):
+    def test_failing_probe_populates_error_field(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            monitor = HealthMonitor(tmp)
+
+            def failing_probe():
+                raise RuntimeError("probe failed")
+
+            probes = {"test_probe": failing_probe}
+            report = monitor.check(probes)
+
+            self.assertIn("test_probe", report["checks"])
+            self.assertFalse(report["checks"]["test_probe"]["ok"])
+            self.assertEqual(report["checks"]["test_probe"]["error"], "probe failed")
+            self.assertFalse(report["healthy"])
 
 class TestArchiveStore(unittest.TestCase):
     def test_restore_copies_archive_to_destination_and_returns_path(self):
