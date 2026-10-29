@@ -153,3 +153,10 @@ All notable changes to this project will be documented in this file.
 - **链接**：https://github.com/dylanma8232-art/Daming-OS/pull/53
 - **改动文件**：
 - daming_os/memory/graph.py
+
+## 2026-10-29 05:28 迭代
+
+- **PR**：54 🧪 test: add tests for QualityGate in quality.py
+- **链接**：https://github.com/dylanma8232-art/Daming-OS/pull/54
+- **改动文件**：
+- tests/test_quality.py
