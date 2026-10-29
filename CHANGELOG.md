@@ -132,3 +132,10 @@ All notable changes to this project will be documented in this file.
 - **链接**：https://github.com/dylanma8232-art/Daming-OS/pull/49
 - **改动文件**：
 - 
+
+## 2026-10-29 05:25 迭代
+
+- **PR**：50 🧪 Add missing error test for HealthMonitor check
+- **链接**：https://github.com/dylanma8232-art/Daming-OS/pull/50
+- **改动文件**：
+- tests/test_operations.py
