@@ -1,0 +1,59 @@
+name: Weekly TODO and Performance Optimization
+
+on:
+  schedule:
+    - cron: '0 0 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  scan-and-trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Scan for TODOs and Performance Improvements
+        id: scan
+        run: |
+          echo "Scanning codebase for TODOs..."
+          TODO_RESULTS=$(grep -rni "TODO" . \
+            --exclude-dir=.git \
+            --exclude-dir=__pycache__ \
+            --exclude-dir=.github \
+            --exclude-dir=.daming \
+            --exclude=*.md \
+            || true)
+
+          echo "Generating issue content..."
+          ISSUE_FILE="issue_body.md"
+          echo "@google-labs-jules" > $ISSUE_FILE
+          echo "" >> $ISSUE_FILE
+          echo "Please analyze the codebase for TODOs and potential performance optimization points." >> $ISSUE_FILE
+          echo "Below is an automatic scan of current TODOs in the codebase:" >> $ISSUE_FILE
+          echo "" >> $ISSUE_FILE
+          echo '```' >> $ISSUE_FILE
+          if [ -z "$TODO_RESULTS" ]; then
+            echo "No TODOs found!" >> $ISSUE_FILE
+          else
+            echo "$TODO_RESULTS" | head -n 50 >> $ISSUE_FILE
+            if [ $(echo "$TODO_RESULTS" | wc -l) -gt 50 ]; then
+              echo "... and more." >> $ISSUE_FILE
+            fi
+          fi
+          echo '```' >> $ISSUE_FILE
+          echo "" >> $ISSUE_FILE
+          echo "Please analyze these and any other performance bottlenecks, modify the code, and submit a PR." >> $ISSUE_FILE
+
+      - name: Create Issue for Jules
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          DATE=$(date -u +"%Y-%m-%d")
+          gh issue create \
+            --title "Weekly Optimization & TODO Resolution - $DATE" \
+            --body-file issue_body.md \
+            --label "enhancement,jules"
