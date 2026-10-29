@@ -29,6 +29,19 @@ jobs:
             echo "is_jules=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Mark ready for review
+        if: steps.identify.outputs.is_jules == 'true'
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh pr view "$PR_URL" --json isDraft -q '.isDraft' | grep -q 'true'; then
+            echo "Draft PR detected, marking ready for review..."
+            gh pr ready "$PR_URL"
+          else
+            echo "PR already ready for review."
+          fi
+
       - name: Approve PR
         if: steps.identify.outputs.is_jules == 'true'
         env:
@@ -65,3 +78,36 @@ jobs:
           done
           echo "::error::CI did not complete within 30 min, not merging."
           exit 1
+
+      - name: Checkout main for iteration log
+        if: steps.identify.outputs.is_jules == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Record iteration in Chinese
+        if: steps.identify.outputs.is_jules == 'true'
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git pull origin main
+          NUM=${{ github.event.pull_request.number }}
+          TITLE=$(gh pr view "$PR_URL" --json title -q '.title')
+          FILES=$(gh pr view "$PR_URL" --json files -q '.files[].path')
+          DATE=$(date -u "+%Y-%m-%d %H:%M")
+          {
+            echo ""
+            echo "## ${DATE} 迭代"
+            echo ""
+            echo "- **PR**：${NUM} ${TITLE}"
+            echo "- **链接**：${PR_URL}"
+            echo "- **改动文件**："
+            echo "${FILES}" | sed 's/^/- /'
+          } >> CHANGELOG.md
+          git add CHANGELOG.md
+          git commit -m "docs(迭代): 记录 PR #${NUM} 的改动" || true
+          git push origin main || true
