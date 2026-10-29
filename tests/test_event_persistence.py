@@ -1,6 +1,12 @@
 import unittest
+import sys
+import os
 from unittest.mock import patch, MagicMock
 from pathlib import Path
+
+# Add the project directory to sys.path to allow imports
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 from daming_os.events import EventBus, LogEvent
 
 class TestEventBus(unittest.TestCase):
