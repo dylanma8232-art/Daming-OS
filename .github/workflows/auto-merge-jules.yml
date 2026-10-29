@@ -7,69 +7,107 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  checks: read
+
+concurrency:
+  group: auto-merge-jules-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
 
 jobs:
   auto-merge:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout main repository
+      - name: Identify Jules PR
+        id: identify
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          if printf '%s' "$BODY" | grep -q "PR created automatically by Jules" || printf '%s' "$BRANCH" | grep -Eq '[0-9]{15}'; then
+            echo "is_jules=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_jules=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Mark ready for review
+        if: steps.identify.outputs.is_jules == 'true'
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh pr view "$PR_URL" --json isDraft -q '.isDraft' | grep -q 'true'; then
+            echo "Draft PR detected, marking ready for review..."
+            gh pr ready "$PR_URL"
+          else
+            echo "PR already ready for review."
+          fi
+
+      - name: Approve PR
+        if: steps.identify.outputs.is_jules == 'true'
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh pr review "$PR_URL" --approve --body "Auto-approved by Jules (CI-gated)." || echo "approve skipped"
+
+      - name: Wait for CI then merge
+        if: steps.identify.outputs.is_jules == 'true'
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Waiting for CI on $PR_URL (sha=$SHA)..."
+          for i in $(seq 1 90); do
+            CONC=$(gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100" -q '[.check_runs[] | select(.name=="ci")] | sort_by(.started_at // "0") | .[-1].conclusion // "pending"' 2>/dev/null || echo pending)
+            case "$CONC" in
+              success)
+                echo "CI passed, merging..."
+                gh pr merge "$PR_URL" --squash --delete-branch
+                exit 0
+                ;;
+              failure|cancelled|timed_out|action_required|skipped|stale)
+                echo "::error::CI concluded '$CONC', not merging."
+                exit 1
+                ;;
+              *)
+                echo "CI status=$CONC (poll $i/90), waiting..."
+                sleep 20
+                ;;
+            esac
+          done
+          echo "::error::CI did not complete within 30 min, not merging."
+          exit 1
+
+      - name: Checkout main for iteration log
+        if: steps.identify.outputs.is_jules == 'true'
         uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
 
-      - name: Check if PR is created by Jules
-        id: check_jules
-        run: |
-          BODY="${{ github.event.pull_request.body }}"
-          BRANCH="${{ github.event.pull_request.head.ref }}"
-          echo "Inspecting PR #${{ github.event.pull_request.number }}..."
-          if echo "$BODY" | grep -q "PR created automatically by Jules" || echo "$BRANCH" | grep -Eq '[0-9]{15,}'; then
-            echo "is_jules=true" >> $GITHUB_OUTPUT
-            echo "Match confirmed: Jules PR."
-          else
-            echo "is_jules=false" >> $GITHUB_OUTPUT
-            echo "Not a Jules PR, skipping auto-merge."
-          fi
-
-      - name: Approve PR
-        if: steps.check_jules.outputs.is_jules == 'true'
-        run: |
-          gh pr review "$PR_URL" --approve --body "Auto-approved Jules suggestion by GitHub Actions bot."
+      - name: Record iteration in Chinese
+        if: steps.identify.outputs.is_jules == 'true'
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Merge and Delete Branch
-        if: steps.check_jules.outputs.is_jules == 'true'
-        run: |
-          gh pr merge "$PR_URL" --squash --delete-branch --admin
-        env:
-          PR_URL: ${{ github.event.pull_request.html_url }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Record Iteration in CHANGELOG.md
-        if: steps.check_jules.outputs.is_jules == 'true'
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git pull origin main
-          DATE=$(date -u +"%Y-%m-%d %H:%M")
-          ENTRY="### [$DATE UTC] PR #${{ github.event.pull_request.number }}: ${{ github.event.pull_request.title }}\n- **PR 链接**: ${{ github.event.pull_request.html_url }}\n"
-          python3 -c "
-import os
-entry = '''### [$DATE UTC] PR #${{ github.event.pull_request.number }}: ${{ github.event.pull_request.title }}\n- **PR 链接**: ${{ github.event.pull_request.html_url }}\n\n'''
-if os.path.exists('CHANGELOG.md'):
-    with open('CHANGELOG.md', 'r', encoding='utf-8') as f:
-        content = f.read()
-    if '---' in content:
-        parts = content.split('---', 1)
-        new_content = parts[0] + '---\n\n' + entry + parts[1].lstrip()
-    else:
-        new_content = entry + content
-    with open('CHANGELOG.md', 'w', encoding='utf-8') as f:
-        f.write(new_content)
-"
+          NUM=${{ github.event.pull_request.number }}
+          TITLE=$(gh pr view "$PR_URL" --json title -q '.title')
+          FILES=$(gh pr view "$PR_URL" --json files -q '.files[].path')
+          DATE=$(date -u "+%Y-%m-%d %H:%M")
+          {
+            echo ""
+            echo "## ${DATE} 迭代"
+            echo ""
+            echo "- **PR**：${NUM} ${TITLE}"
+            echo "- **链接**：${PR_URL}"
+            echo "- **改动文件**："
+            echo "${FILES}" | sed 's/^/- /'
+          } >> CHANGELOG.md
           git add CHANGELOG.md
-          git commit -m "docs(changelog): record PR #${{ github.event.pull_request.number }} auto-merge" || true
+          git commit -m "docs(迭代): 记录 PR #${NUM} 的改动" || true
           git push origin main || true
