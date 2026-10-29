@@ -69,3 +69,10 @@ All notable changes to this project will be documented in this file.
 
 ### Removed
 - Removed the Github Star prompt during workspace initialization to keep the CLI experience clean and professional.
+
+## 2026-10-29 02:17 迭代
+
+- **PR**：41 feat: add weekly TODO and performance optimization automation
+- **链接**：https://github.com/dylanma8232-art/Daming-OS/pull/41
+- **改动文件**：
+- .github/workflows/weekly-optimization.yml
