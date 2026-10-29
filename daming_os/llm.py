@@ -1,5 +1,5 @@
 import json
-from typing import Optional, Dict, Any, List
+from typing import Dict, Any, List
 
 class LLMProvider:
     def __init__(self, model_name: str = "gpt-4o"):
