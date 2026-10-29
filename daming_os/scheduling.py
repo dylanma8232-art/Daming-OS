@@ -4,7 +4,7 @@ import hashlib, json, os, threading, time
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Protocol, Tuple
+from typing import Any, Callable, Dict, Iterable, Optional, Protocol, Tuple
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 class Scheduler(Protocol):
