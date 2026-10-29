@@ -131,7 +131,9 @@ class HardenedSemanticCache:
         for key, entry in l2_cache.items():
             cache_vector = entry["vector"]
             dot_product = sum(a * b for a, b in zip(query_vector, cache_vector))
-            norm_c = math.sqrt(sum(b * b for b in cache_vector))
+            norm_c = entry.get("norm")
+            if norm_c is None:
+                norm_c = math.sqrt(sum(b * b for b in cache_vector))
             if norm_q > 0.0 and norm_c > 0.0:
                 similarity = dot_product / (norm_q * norm_c)
             else:
@@ -188,7 +190,8 @@ class HardenedSemanticCache:
                 "vector": query_vector,
                 "response": response,
                 "freq": 1,
-                "last_used": t_now
+                "last_used": t_now,
+                "norm": math.sqrt(sum(a * a for a in query_vector))
             }
             
         self._save_state({"l1_cache": l1_cache, "l2_cache": l2_cache})
