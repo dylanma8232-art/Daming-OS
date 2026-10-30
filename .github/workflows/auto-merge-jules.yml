@@ -22,7 +22,29 @@ jobs:
         env:
           BODY: ${{ github.event.pull_request.body }}
           BRANCH: ${{ github.event.pull_request.head.ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO: ${{ github.repository }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          REPO_OWNER: ${{ github.repository_owner }}
         run: |
+          # Ensure PR is from same repository (not a fork)
+          if [ "$HEAD_REPO" != "$BASE_REPO" ]; then
+            echo "PR is from a fork ($HEAD_REPO != $BASE_REPO), not auto-merging."
+            echo "is_jules=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Ensure PR author is an authorized Jules account or repository owner
+          case "$PR_AUTHOR" in
+            google-labs-jules|"google-labs-jules[bot]"|"$REPO_OWNER")
+              ;;
+            *)
+              echo "PR author ($PR_AUTHOR) is not authorized for auto-merge."
+              echo "is_jules=false" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+          esac
+
           if printf '%s' "$BODY" | grep -q "PR created automatically by Jules" || printf '%s' "$BRANCH" | grep -Eq '[0-9]{15}'; then
             echo "is_jules=true" >> "$GITHUB_OUTPUT"
           else
