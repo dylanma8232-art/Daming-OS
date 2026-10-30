@@ -17,7 +17,7 @@ class SafetyVisitor(ast.NodeVisitor):
         self.is_safe = True
         self.errors = []
         self.blocked_imports = {"subprocess", "os", "pty"}
-        self.blocked_functions = {"getattr"}
+        self.blocked_functions = {"getattr", "open", "compile", "eval", "exec", "__import__"}
 
     def visit_Import(self, node):
         for alias in node.names:
