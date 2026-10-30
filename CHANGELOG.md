@@ -168,3 +168,11 @@ All notable changes to this project will be documented in this file.
 - **改动文件**：
 - daming_os/memory/cache.py
 - daming_os/memory/cache.py.orig
+
+## 2026-10-30 03:52 迭代
+
+- **PR**：68 fix(ci): secure Jules auto-merge workflow against fork PR spoofing
+- **链接**：https://github.com/dylanma8232-art/Daming-OS/pull/68
+- **改动文件**：
+- .github/workflows/auto-merge-jules.yml
+- tests/test_workflow_security.py
