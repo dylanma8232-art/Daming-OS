@@ -179,7 +179,9 @@ class MemorySystem:
         cached_result = self.cache.get(recall_query, query_vector)
         if cached_result is not None:
             logger.debug("L1/L2 cache hit for query.")
-            return cached_result[:top_k]
+            revalidated = self._revalidate_cached_results(cached_result, scope)
+            if revalidated:
+                return revalidated[:top_k]
 
         logger.debug("Cache miss. Performing 3-Way RRF retrieval.")
         
@@ -226,13 +228,35 @@ class MemorySystem:
         self.cache.set(recall_query, final_results, query_vector)
         return final_results[:top_k]
 
+    def _revalidate_cached_results(self, results: List[Dict[str, Any]],
+                                   scope: Optional[MemoryScope] = None) -> List[Dict[str, Any]]:
+        if not results:
+            return []
+        item_ids = [item.get("id", "") for item in results if item.get("id")]
+        sqlite_mgr = getattr(self, "sqlite_manager", None)
+        meta_dict = sqlite_mgr.get_items_meta(item_ids) if sqlite_mgr else {}
+
+        valid_results = []
+        for item in results:
+            item_id = item.get("id", "")
+            meta = meta_dict.get(item_id)
+            if scope and scope.tenant_id and not meta:
+                continue
+            if meta:
+                if not visible_to_scope(meta.get("metadata", {}), scope):
+                    continue
+                if self.policy.is_expired(meta.get("metadata", {})):
+                    continue
+            valid_results.append(item)
+        return valid_results
+
     def _apply_safety_and_qvalue(self, results: List[Dict[str, Any]],
                                  scope: Optional[MemoryScope] = None) -> List[Dict[str, Any]]:
         bypass = []
         normal = []
 
         item_ids = [item.get("id", "") for item in results if item.get("id")]
-        meta_dict = self.sqlite_manager.get_items_meta(item_ids)
+        meta_dict = self.sqlite_manager.get_items_meta(item_ids) if getattr(self, "sqlite_manager", None) else {}
 
         for item in results:
             item_id = item.get("id", "")
@@ -281,11 +305,17 @@ class MemorySystem:
         clean_content, clean_metadata = self.policy.prepare(content, metadata, scope)
         logger.info("Stored context into 大明记忆系统. Scope: %s", scope)
         data = {"content": clean_content, "meta": clean_metadata}
-        hot_written = self.hot_state.write_memory(session_key, data)
-        self.hot_journal.append(session_key, clean_content,
+        effective_scope = scope or MemoryScope(
+            tenant_id=clean_metadata.get("tenant_id"),
+            agent_id=clean_metadata.get("agent_id"),
+            session_id=clean_metadata.get("session_id") or session_key,
+        )
+        effective_key = effective_scope.scoped_key(session_key)
+        hot_written = self.hot_state.write_memory(effective_key, data)
+        self.hot_journal.append(effective_key, clean_content,
                                 tool_calls=clean_metadata.get("tool_calls", []),
                                 state_diff=clean_metadata.get("state_diff", {}))
-        queued = queue_incoming_memory(session_key, data, db_path=self.sqlite_path)
+        queued = queue_incoming_memory(effective_key, data, db_path=self.sqlite_path)
         return hot_written and queued
 
     def promote_pending_memories(self) -> int:
