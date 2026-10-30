@@ -202,3 +202,14 @@ All notable changes to this project will be documented in this file.
 - **改动文件**：
 - daming_os/memory/services.py
 - tests/test_portable_runtime.py
+
+## 2026-10-30 03:56 迭代
+
+- **PR**：74 Namespace session identity by full scope for hot journal and consolidation
+- **链接**：https://github.com/dylanma8232-art/Daming-OS/pull/74
+- **改动文件**：
+- daming_os/adapter.py
+- daming_os/memory/consolidator.py
+- daming_os/memory/core.py
+- daming_os/memory/governance.py
+- tests/test_scoped_session_isolation.py
