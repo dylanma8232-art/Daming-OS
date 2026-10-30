@@ -179,7 +179,9 @@ class MemorySystem:
         cached_result = self.cache.get(recall_query, query_vector)
         if cached_result is not None:
             logger.debug("L1/L2 cache hit for query.")
-            return cached_result[:top_k]
+            revalidated = self._revalidate_cached_results(cached_result, scope)
+            if revalidated:
+                return revalidated[:top_k]
 
         logger.debug("Cache miss. Performing 3-Way RRF retrieval.")
         
@@ -226,13 +228,35 @@ class MemorySystem:
         self.cache.set(recall_query, final_results, query_vector)
         return final_results[:top_k]
 
+    def _revalidate_cached_results(self, results: List[Dict[str, Any]],
+                                   scope: Optional[MemoryScope] = None) -> List[Dict[str, Any]]:
+        if not results:
+            return []
+        item_ids = [item.get("id", "") for item in results if item.get("id")]
+        sqlite_mgr = getattr(self, "sqlite_manager", None)
+        meta_dict = sqlite_mgr.get_items_meta(item_ids) if sqlite_mgr else {}
+
+        valid_results = []
+        for item in results:
+            item_id = item.get("id", "")
+            meta = meta_dict.get(item_id)
+            if scope and scope.tenant_id and not meta:
+                continue
+            if meta:
+                if not visible_to_scope(meta.get("metadata", {}), scope):
+                    continue
+                if self.policy.is_expired(meta.get("metadata", {})):
+                    continue
+            valid_results.append(item)
+        return valid_results
+
     def _apply_safety_and_qvalue(self, results: List[Dict[str, Any]],
                                  scope: Optional[MemoryScope] = None) -> List[Dict[str, Any]]:
         bypass = []
         normal = []
 
         item_ids = [item.get("id", "") for item in results if item.get("id")]
-        meta_dict = self.sqlite_manager.get_items_meta(item_ids)
+        meta_dict = self.sqlite_manager.get_items_meta(item_ids) if getattr(self, "sqlite_manager", None) else {}
 
         for item in results:
             item_id = item.get("id", "")

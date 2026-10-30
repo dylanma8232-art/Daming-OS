@@ -9,6 +9,13 @@ from typing import Dict, Any, Optional, List
 
 logger = logging.getLogger("daming_os.memory.cache")
 
+
+def _get_scope_prefix(key: str) -> str:
+    if key.startswith("scope:"):
+        return key.split("\n", 1)[0]
+    return ""
+
+
 class HardenedSemanticCache:
     """
     Decoupled L1/L2 Semantic Cache Engine.
@@ -127,8 +134,11 @@ class HardenedSemanticCache:
         best_similarity = -1.0
         
         norm_q = math.sqrt(sum(a * a for a in query_vector))
+        query_scope = _get_scope_prefix(query)
 
         for key, entry in l2_cache.items():
+            if _get_scope_prefix(key) != query_scope:
+                continue
             cache_vector = entry["vector"]
             dot_product = sum(a * b for a, b in zip(query_vector, cache_vector))
             norm_c = entry.get("norm")
