@@ -176,3 +176,12 @@ All notable changes to this project will be documented in this file.
 - **改动文件**：
 - .github/workflows/auto-merge-jules.yml
 - tests/test_workflow_security.py
+
+## 2026-10-30 03:53 迭代
+
+- **PR**：70 Fix memory scope boundaries for agent_id and session_id
+- **链接**：https://github.com/dylanma8232-art/Daming-OS/pull/70
+- **改动文件**：
+- daming_os/memory/core.py
+- daming_os/memory/governance.py
+- tests/test_governance_and_workflow.py
