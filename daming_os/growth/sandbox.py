@@ -16,8 +16,15 @@ class SafetyVisitor(ast.NodeVisitor):
     def __init__(self):
         self.is_safe = True
         self.errors = []
-        self.blocked_imports = {"subprocess", "os", "pty"}
-        self.blocked_functions = {"getattr"}
+        self.blocked_imports = {
+            "subprocess", "os", "pty", "shutil", "importlib", "sys",
+            "socket", "pathlib", "ctypes", "platform", "multiprocessing",
+            "threading", "signal", "tempfile", "builtins"
+        }
+        self.blocked_functions = {
+            "getattr", "__import__", "eval", "exec", "open", "globals",
+            "locals", "compile", "setattr", "delattr"
+        }
 
     def visit_Import(self, node):
         for alias in node.names:
@@ -35,11 +42,21 @@ class SafetyVisitor(ast.NodeVisitor):
                 self.errors.append(f"Blocked import from: {node.module} at line {node.lineno}")
         self.generic_visit(node)
 
+    def visit_Name(self, node):
+        if isinstance(node.ctx, ast.Load) and node.id in self.blocked_functions:
+            self.is_safe = False
+            self.errors.append(f"Blocked identifier usage: {node.id} at line {node.lineno}")
+        self.generic_visit(node)
+
     def visit_Call(self, node):
+        func_name = None
         if isinstance(node.func, ast.Name):
-            if node.func.id in self.blocked_functions:
-                self.is_safe = False
-                self.errors.append(f"Blocked function call: {node.func.id} at line {node.lineno}")
+            func_name = node.func.id
+        elif isinstance(node.func, ast.Attribute):
+            func_name = node.func.attr
+        if func_name and func_name in self.blocked_functions:
+            self.is_safe = False
+            self.errors.append(f"Blocked function call: {func_name} at line {node.lineno}")
         self.generic_visit(node)
 
 class SandboxGate:
@@ -50,29 +67,24 @@ class SandboxGate:
     def __init__(self):
         self.sandbox_dir = getattr(config, "SANDBOX_BASE_DIR", "/tmp/sandbox")
         os.makedirs(self.sandbox_dir, exist_ok=True)
-        self._start_gc_thread()
+        self.clean_old_sandboxes()
 
-    def _start_gc_thread(self):
-        """Implement a background GC cleanup mechanism for the /tmp/sandbox/evo-<id> folders."""
-        def gc_worker():
-            while True:
-                time.sleep(3600)  # Run GC every hour
-                now = time.time()
-                try:
-                    for entry in os.listdir(self.sandbox_dir):
-                        if entry.startswith("evo-"):
-                            entry_path = os.path.join(self.sandbox_dir, entry)
-                            if os.path.isdir(entry_path):
-                                # Clean up if older than 24 hours
-                                stat = os.stat(entry_path)
-                                if now - stat.st_mtime > 86400:
-                                    shutil.rmtree(entry_path, ignore_errors=True)
-                                    logger.info(f"GC cleaned up sandbox: {entry_path}")
-                except Exception as e:
-                    logger.error(f"GC Error: {e}")
-
-        gc_thread = threading.Thread(target=gc_worker, daemon=True)
-        gc_thread.start()
+    def clean_old_sandboxes(self, max_age_seconds: int = 86400):
+        """Clean up old sandbox folders on demand without spawning background threads."""
+        now = time.time()
+        try:
+            if not os.path.exists(self.sandbox_dir):
+                return
+            for entry in os.listdir(self.sandbox_dir):
+                if entry.startswith("evo-"):
+                    entry_path = os.path.join(self.sandbox_dir, entry)
+                    if os.path.isdir(entry_path):
+                        stat = os.stat(entry_path)
+                        if now - stat.st_mtime > max_age_seconds:
+                            shutil.rmtree(entry_path, ignore_errors=True)
+                            logger.info(f"GC cleaned up sandbox: {entry_path}")
+        except Exception as e:
+            logger.error(f"GC Error: {e}")
 
     def validate_ast(self, source_code: str) -> Tuple[bool, str]:
         """Validate if the proposed code is syntactically sound and safe using AST."""

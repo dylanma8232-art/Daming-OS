@@ -51,8 +51,11 @@ class WorkspaceProposalValidator:
         safe, evidence = self.sandbox.validate_ast(source)
         if not safe:
             raise ValueError(evidence)
-        # Syntax-only modules cannot be executed safely as standalone programs;
-        # explicit smoke commands are opt-in and still run inside the sandbox.
+
+    def validate_execution(self, proposal: Dict[str, Any]) -> None:
+        path, source = self._fields(proposal)
+        if proposal["payload"].get("artifact_type") == "skill":
+            return
         if proposal["payload"].get("smoke_test", True):
             passed, evidence = self.sandbox.run_smoke_test(path.name, source, evo_id=proposal["id"])
             if not passed:

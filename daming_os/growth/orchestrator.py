@@ -62,17 +62,17 @@ class EvolutionOrchestrator:
             logger.error(f"Evolution {proposal_id} failed AST gate: {msg}")
             return
             
-        # 2. Smoke Test
-        is_smoke_valid, smoke_msg = self.sandbox.run_smoke_test(target_file, proposed_code)
-        if not is_smoke_valid:
-            logger.error(f"Evolution {proposal_id} failed smoke test: {smoke_msg}")
-            return
-            
-        # 3. Human in the loop (HITL) Webhook
+        # 2. Human in the loop (HITL) Webhook
         diff_summary = f"Refactored {target_file} to fix runtime exceptions."
         approved = self.approval_adapter.request_approval(proposal_id, diff_summary)
         
         if approved:
+            # 3. Smoke Test (runs only after approval)
+            is_smoke_valid, smoke_msg = self.sandbox.run_smoke_test(target_file, proposed_code)
+            if not is_smoke_valid:
+                logger.error(f"Evolution {proposal_id} failed smoke test: {smoke_msg}")
+                return
+
             self._deploy_atomic(target_file, proposed_code)
             # 4. Fire event to decouple from Memory Cache clearing
             bus.publish(EvolutionCompletedEvent(
