@@ -1,0 +1,302 @@
+from dataclasses import dataclass, field
+import logging
+import collections
+import time
+from typing import List, Dict, Any, Optional
+
+from ..config import config
+from ..events import bus, EvolutionCompletedEvent
+from .cache import HardenedSemanticCache
+from .db import HardenedSQLiteManager, get_markdown_content, get_markdown_contents, queue_incoming_memory
+from .hot import SessionStateMachine
+from .warm import vector_search
+from .cold import sparse_search
+from .governance import MemoryPolicy, MemoryScope, visible_to_scope
+from .runtime import HotMemoryJournal
+from .embeddings import EmbeddingProvider, LocalHashEmbeddingProvider
+
+logger = logging.getLogger("daming_os.memory.core")
+
+def rrf_fusion(ranked_lists: List[List[Dict[str, Any]]], k: int = 10) -> List[Dict[str, Any]]:
+    """Reciprocal Rank Fusion (RRF)"""
+    scores: Dict[str, float] = {}
+
+    for ranked_list in ranked_lists:
+        for rank, item in enumerate(ranked_list):
+            item_id = item.get("id", "")
+            if not item_id:
+                continue
+            scores[item_id] = scores.get(item_id, 0.0) + 1.0 / (k + rank + 1)
+
+    sorted_ids = sorted(scores.keys(), key=lambda x: -scores[x])
+    return [
+        {"id": mid, "rrf_score": round(scores[mid], 6)}
+        for mid in sorted_ids
+    ]
+
+class SpreadingActivationTraverser:
+    """Spreading Activation Traverser for Graph Search"""
+    def __init__(self, cache_ttl: float = 60.0):
+        self._adj_list_cache = None
+        self._cache_time = 0.0
+        self._cache_ttl = cache_ttl
+        self._db_path = None
+
+    def traverse(self, seed_ids: List[str], db_path: str) -> List[Dict[str, Any]]:
+        manager = HardenedSQLiteManager(db_path)
+
+        current_time = time.time()
+        if self._adj_list_cache is None or self._db_path != db_path or (current_time - self._cache_time) > self._cache_ttl:
+            self._adj_list_cache = manager.get_adjacency_list()
+            self._cache_time = current_time
+            self._db_path = db_path
+
+        adj_list = self._adj_list_cache
+        
+        beta = 0.5
+        gamma = 0.1
+        max_depth = 2
+        
+        results = {}
+        queue = collections.deque([(sid, 1.0, 0) for sid in seed_ids])
+        visited = set(seed_ids)
+        
+        for sid in seed_ids:
+            results[sid] = 1.0
+            
+        while queue:
+            curr_id, activation, depth = queue.popleft()
+            if depth >= max_depth:
+                continue
+                
+            edges = adj_list.get(curr_id, [])
+            for edge in edges:
+                target = edge.get("target_node")
+                weight = edge.get("weight", 0.5)
+                
+                if target:
+                    new_activation = activation * weight * beta - gamma
+                    if new_activation > 0:
+                        results[target] = results.get(target, 0.0) + new_activation
+                        if target not in visited:
+                            visited.add(target)
+                            queue.append((target, new_activation, depth + 1))
+        
+        return sorted([{"id": k, "score": v, "source": "graph"} for k, v in results.items() if k not in seed_ids], key=lambda x: -x["score"])
+
+
+@dataclass
+class QueryOptions:
+    query_vector: Optional[List[float]] = None
+    top_k: int = 3
+    max_chars: int = 1000
+    messages: Optional[List[Dict[str, Any]]] = None
+    scope: Optional[MemoryScope] = None
+
+# Both Jules parameter-object names share the same retrieval contract.
+QueryContext = QueryOptions
+
+
+class MemorySystem:
+    """
+    Core Memory Engine implementing 3-Way RRF (Reciprocal Rank Fusion).
+    Coordinates Layer 1 (Hot), Layer 2 (Warm), and Layer 3 (Cold).
+    """
+    def __init__(self, policy: Optional[MemoryPolicy] = None, embedding_provider: Optional[EmbeddingProvider] = None):
+        from pathlib import Path
+        workspace = Path(config.WORKSPACE_ROOT)
+        (workspace / "memory").mkdir(parents=True, exist_ok=True)
+        self.cache = HardenedSemanticCache(cache_file=str(workspace / "memory" / "semantic-cache.json"))
+        self.policy = policy or MemoryPolicy()
+        self.embedding_provider = embedding_provider or LocalHashEmbeddingProvider()
+        self.sqlite_manager = HardenedSQLiteManager()
+        self.sqlite_path = self.sqlite_manager.db_path
+        raw_vector = Path(config.MEMORY_DB_PATH)
+        self.vector_path = str(raw_vector if raw_vector.is_absolute() else workspace / raw_vector)
+        self.traverser = SpreadingActivationTraverser()
+        self.hot_state = SessionStateMachine(session_dir=str(workspace / "memory" / "sessions"))
+        hot_dir = config.HOT_MEMORY_DIR
+        resolved_hot_dir = Path(hot_dir) if Path(hot_dir).is_absolute() else Path(config.WORKSPACE_ROOT) / hot_dir
+        self.hot_journal = HotMemoryJournal(str(resolved_hot_dir))
+        
+        # Subscribe to Growth OS events to handle cache clearing neutrally
+        bus.subscribe(EvolutionCompletedEvent, self._on_evolution_completed)
+        logger.info("大明记忆系统 initialized. Subscribed to EvolutionCompletedEvent.")
+
+    def _on_evolution_completed(self, event: EvolutionCompletedEvent):
+        """Event Listener: Flush L1/L2 semantic cache when a new capability is evolved."""
+        logger.info(f"Received EvolutionCompletedEvent for {event.proposal_id}. Flushing semantic cache.")
+        self.cache.clear()
+
+    def close(self) -> None:
+        bus.unsubscribe(EvolutionCompletedEvent, self._on_evolution_completed)
+
+    def query(self, text: str, options: Optional[QueryOptions] = None, *,
+              context: Optional[QueryContext] = None) -> List[Dict[str, Any]]:
+        """
+        Primary interface for agent retrieval.
+        Attempts L1/L2 cache first, then performs 3-Way RRF fallback.
+        """
+        if options is not None and context is not None:
+            raise ValueError("Pass either options or context, not both")
+        options = options if options is not None else context
+        options = options if options is not None else QueryOptions()
+        query_vector = options.query_vector
+        top_k = options.top_k
+        max_chars = options.max_chars
+        messages = options.messages
+        scope = options.scope
+
+        # 针对多轮会话追问进行前置上下文拼接，消除指代失忆
+        recall_query = text
+        if messages and isinstance(messages, list):
+            user_texts = []
+            for msg in reversed(messages):
+                if isinstance(msg, dict) and msg.get("role") == "user":
+                    content = msg.get("content", "")
+                    if isinstance(content, str) and content.strip():
+                        user_texts.insert(0, content.strip())
+                        if len(user_texts) >= 3:
+                            break
+            if user_texts:
+                recall_query = "\n".join(user_texts)
+                logger.info(f"Multi-turn context aggregated: {repr(recall_query)}")
+
+        # The complete isolation scope belongs to the cache key.  A tenant-only
+        # key could still leak an agent or session scoped result.
+        if scope:
+            scope_key = "|".join((scope.tenant_id or "", scope.agent_id or "", scope.session_id or ""))
+            recall_query = f"scope:{scope_key}\n{recall_query}"
+
+        # L2 needs an embedding *before* cache lookup.  The old order made the
+        # semantic cache unreachable for the default adapter path.
+        if query_vector is None and self.embedding_provider is not None:
+            try:
+                query_vector = self.embedding_provider.embed(recall_query)
+            except Exception as exc:
+                logger.warning("Embedding generation failed; using sparse retrieval: %s", exc)
+
+        cached_result = self.cache.get(recall_query, query_vector)
+        if cached_result is not None:
+            logger.debug("L1/L2 cache hit for query.")
+            return cached_result[:top_k]
+
+        logger.debug("Cache miss. Performing 3-Way RRF retrieval.")
+        
+        # 1. Warm Layer (LanceDB Dense Vector Search)
+        warm_results = (vector_search(recall_query, query_vector, db_path=self.vector_path, top_k=20)
+                        if query_vector is not None else [])
+        
+        # Fallback if LanceDB has no results
+        if not warm_results:
+            fallback_items = self.sqlite_manager.get_top_items(limit=20)
+            warm_results = [{"id": item["item_id"], "score": 0.8, "source": "vector_fallback"} for item in fallback_items]
+
+        seed_ids = [r["id"] for r in warm_results[:5]]
+
+        # 2. Cold Layer (SQLite FTS5 Sparse Text Search)
+        cold_results = sparse_search(recall_query, db_path=self.sqlite_path, top_k=10)
+        
+        for r in cold_results[:3]:
+            if r["id"] not in seed_ids:
+                seed_ids.append(r["id"])
+
+        # 3. Spreading Activation (Graph Search)
+        graph_results = self.traverser.traverse(seed_ids, db_path=self.sqlite_path)
+        
+        # Combine via 3-Way RRF
+        fused = rrf_fusion([warm_results, graph_results, cold_results], k=10)
+        
+        # Hydrate with markdown content
+        fused_ids = [res["id"] for res in fused]
+        contents_dict = get_markdown_contents(fused_ids, self.sqlite_manager)
+
+        for res in fused:
+            content = contents_dict.get(res["id"])
+            if content:
+                if len(content) > max_chars:
+                    res["content"] = content[:max_chars] + "\n\n... [Content Truncated due to length limit]"
+                else:
+                    res["content"] = content
+                
+        # Apply safety/Q-value ranking & Message Compactor math
+        final_results = self._apply_safety_and_qvalue(fused, scope)[:10]
+
+        # Store back to cache
+        self.cache.set(recall_query, final_results, query_vector)
+        return final_results[:top_k]
+
+    def _apply_safety_and_qvalue(self, results: List[Dict[str, Any]],
+                                 scope: Optional[MemoryScope] = None) -> List[Dict[str, Any]]:
+        bypass = []
+        normal = []
+
+        item_ids = [item.get("id", "") for item in results if item.get("id")]
+        meta_dict = self.sqlite_manager.get_items_meta(item_ids)
+
+        for item in results:
+            item_id = item.get("id", "")
+            meta = meta_dict.get(item_id)
+            # Legacy records without scope metadata are intentionally invisible
+            # to a tenant-scoped query; leaking an old unscoped record is worse
+            # than requiring one migration/consolidation pass.
+            if scope and scope.tenant_id and not meta:
+                continue
+            if meta:
+                if not visible_to_scope(meta.get("metadata", {}), scope):
+                    continue
+                if self.policy.is_expired(meta.get("metadata", {})):
+                    continue
+                importance = meta.get("importance") or 0.0
+                category = meta.get("category") or ""
+                if importance >= 0.9 or category == "security_redline":
+                    item["bypass"] = True
+                    bypass.append(item)
+                    continue
+            normal.append(item)
+
+        for item in normal:
+            similarity = item.get("rrf_score", item.get("score", 0.0))
+            q_value = item.get("q_value", 0.5)
+            recency = item.get("recency", 0.5)
+            final_score = 0.6 * similarity + 0.3 * q_value + 0.1 * recency
+            
+            # Message Compactor math: ID(i) = final_score / len(text)
+            content_length = len(item.get("content", item.get("id", "")))
+            compactor_id = final_score / max(1, content_length)
+            
+            item["final_score"] = final_score
+            item["information_density"] = compactor_id
+
+        # Sort by Information Density (Message Compactor math)
+        normal.sort(key=lambda x: x.get("information_density", 0), reverse=True)
+        return bypass + normal
+
+    def store(self, content: str, metadata: dict = None, session_key: str = "current",
+              scope: Optional[MemoryScope] = None) -> bool:
+        """
+        Store short-term memory to Layer 1 (Hot) which will eventually 
+        be flushed to LanceDB and FTS5.
+        """
+        clean_content, clean_metadata = self.policy.prepare(content, metadata, scope)
+        logger.info("Stored context into 大明记忆系统. Scope: %s", scope)
+        data = {"content": clean_content, "meta": clean_metadata}
+        hot_written = self.hot_state.write_memory(session_key, data)
+        self.hot_journal.append(session_key, clean_content,
+                                tool_calls=clean_metadata.get("tool_calls", []),
+                                state_diff=clean_metadata.get("state_diff", {}))
+        queued = queue_incoming_memory(session_key, data, db_path=self.sqlite_path)
+        return hot_written and queued
+
+    def promote_pending_memories(self) -> int:
+        """Move queued hot memories into the durable vector/FTS/Wiki layers.
+
+        This is deliberately callable by a hook, a long-running agent, or an
+        external scheduler.  Unlike the OpenClaw-only path, the vector write is
+        part of the Daming OS implementation itself.
+        """
+        from .consolidator import MemoryConsolidator
+        promoted = MemoryConsolidator(embedding_provider=self.embedding_provider).run_nightly_consolidation()
+        if promoted:
+            self.cache.clear()
+        return promoted
