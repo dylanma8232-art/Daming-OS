@@ -9,6 +9,13 @@ from typing import Dict, Any, Optional, List
 
 logger = logging.getLogger("daming_os.memory.cache")
 
+
+def _get_scope_prefix(key: str) -> str:
+    if key.startswith("scope:"):
+        return key.split("\n", 1)[0]
+    return ""
+
+
 class HardenedSemanticCache:
     """
     Decoupled L1/L2 Semantic Cache Engine.
