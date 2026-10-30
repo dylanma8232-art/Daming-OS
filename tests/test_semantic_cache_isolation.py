@@ -35,6 +35,28 @@ class TestSemanticCacheIsolation(unittest.TestCase):
             res_a = cache.get(query_a, query_vector=vector_a)
             self.assertEqual(res_a, response_a)
 
+    def test_semantic_cache_explicit_scope_param(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cache_file = str(Path(tmp_dir) / "test-cache-explicit.json")
+            cache = HardenedSemanticCache(cache_file=cache_file)
+
+            scope_a = MemoryScope(tenant_id="tenantA")
+            scope_b = MemoryScope(tenant_id="tenantB")
+
+            vector_a = [1.0, 0.0, 0.0]
+            vector_b = [0.99, 0.01, 0.0]
+
+            cache.set("what is my bank account number", [{"id": "account_a"}], vector_a, scope=scope_a)
+
+            # Tenant B query with scope_b
+            res_b = cache.get("what is my bank account number", vector_b, scope=scope_b)
+            self.assertIsNone(res_b, "Tenant B query with explicit scope should miss Tenant A's cache entry")
+
+            # Tenant A query with scope_a
+            res_a = cache.get("tell me my bank account number", vector_b, scope=scope_a)
+            self.assertIsNotNone(res_a, "Tenant A query with explicit scope should hit Tenant A's cache entry")
+            self.assertEqual(res_a[0]["id"], "account_a")
+
     def test_daming_memory_tenant_cache_isolation(self):
         with tempfile.TemporaryDirectory() as tmp:
             with patch.object(config, "WORKSPACE_ROOT", tmp), \

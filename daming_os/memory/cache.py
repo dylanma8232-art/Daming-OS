@@ -109,22 +109,36 @@ class HardenedSemanticCache:
         utility = self.w_f * math.log1p(freq) + self.w_t * math.exp(-self.lambda_decay * delta_t_hours)
         return utility
 
-    def get(self, query: str, query_vector: Optional[List[float]] = None) -> Optional[Any]:
+    def _resolve_scope_key(self, query: str, scope: Optional[Any] = None) -> str:
+        if scope is not None:
+            if isinstance(scope, str):
+                return scope
+            if hasattr(scope, "tenant_id"):
+                return "|".join((scope.tenant_id or "", getattr(scope, "agent_id", "") or "", getattr(scope, "session_id", "") or ""))
+        if query.startswith("scope:"):
+            scope_line, _, _ = query.partition("\n")
+            return scope_line[6:]
+        return ""
+
+    def get(self, query: str, query_vector: Optional[List[float]] = None, scope: Optional[Any] = None) -> Optional[Any]:
         t_now = time.time()
         state = self._load_state()
         l1_cache = state.get("l1_cache", {})
         l2_cache = state.get("l2_cache", {})
         modified = False
+        query_scope_key = self._resolve_scope_key(query, scope)
         
         if query in l1_cache:
             entry = l1_cache[query]
-            entry["freq"] += 1
-            entry["last_used"] = t_now
-            self.hit_history.append(1)
-            modified = True
-            if modified:
-                self._save_state({"l1_cache": l1_cache, "l2_cache": l2_cache})
-            return entry["response"]
+            entry_scope_key = entry.get("scope_key") if isinstance(entry, dict) and "scope_key" in entry else self._resolve_scope_key(query)
+            if entry_scope_key == query_scope_key:
+                entry["freq"] += 1
+                entry["last_used"] = t_now
+                self.hit_history.append(1)
+                modified = True
+                if modified:
+                    self._save_state({"l1_cache": l1_cache, "l2_cache": l2_cache})
+                return entry["response"]
             
         if len(query) < self.l_min or query_vector is None:
             self.hit_history.append(0)
@@ -137,8 +151,10 @@ class HardenedSemanticCache:
         query_scope = _get_scope_prefix(query)
 
         for key, entry in l2_cache.items():
-            if _get_scope_prefix(key) != query_scope:
+            entry_scope_key = entry.get("scope_key") if isinstance(entry, dict) and "scope_key" in entry else self._resolve_scope_key(key)
+            if entry_scope_key != query_scope_key:
                 continue
+
             cache_vector = entry["vector"]
             dot_product = sum(a * b for a, b in zip(query_vector, cache_vector))
             norm_c = entry.get("norm")
@@ -169,16 +185,18 @@ class HardenedSemanticCache:
         self.hit_history.append(0)
         return None
 
-    def set(self, query: str, response: Any, query_vector: Optional[List[float]] = None) -> None:
+    def set(self, query: str, response: Any, query_vector: Optional[List[float]] = None, scope: Optional[Any] = None) -> None:
         t_now = time.time()
         state = self._load_state()
         l1_cache = state.get("l1_cache", {})
         l2_cache = state.get("l2_cache", {})
+        scope_key = self._resolve_scope_key(query, scope)
         
         l1_cache[query] = {
             "response": response,
             "freq": 1,
-            "last_used": t_now
+            "last_used": t_now,
+            "scope_key": scope_key
         }
         
         if query_vector is not None and len(query) >= self.l_min:
@@ -196,12 +214,14 @@ class HardenedSemanticCache:
                     if evict_key in l1_cache:
                         del l1_cache[evict_key]
                 
+            scope_key = self._resolve_scope_key(query, scope)
             l2_cache[query] = {
                 "vector": query_vector,
                 "response": response,
                 "freq": 1,
                 "last_used": t_now,
-                "norm": math.sqrt(sum(a * a for a in query_vector))
+                "norm": math.sqrt(sum(a * a for a in query_vector)),
+                "scope_key": scope_key
             }
             
         self._save_state({"l1_cache": l1_cache, "l2_cache": l2_cache})
