@@ -32,6 +32,14 @@ class MemoryScope:
             "session_id": self.session_id,
         }.items() if value}
 
+    def scoped_key(self, default_session_id: Optional[str] = None) -> str:
+        sess = self.session_id or default_session_id or "current"
+        if not self.tenant_id and not self.agent_id:
+            return sess
+        parts = [p for p in (self.tenant_id, self.agent_id, sess) if p]
+        raw_key = ":".join(parts)
+        return re.sub(r"[^a-zA-Z0-9_-]", "_", raw_key)
+
 
 @dataclass(frozen=True)
 class MemoryPolicy:

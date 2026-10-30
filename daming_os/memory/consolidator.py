@@ -50,7 +50,11 @@ class MemoryConsolidator:
                     metadata = data.get("meta", {})
                     if not content:
                         continue
-                    item_id = hashlib.sha256(f"{session_key}:{content}".encode()).hexdigest()
+                    tenant_id = metadata.get("tenant_id") or ""
+                    agent_id = metadata.get("agent_id") or ""
+                    sess_id = metadata.get("session_id") or ""
+                    scope_str = f"{tenant_id}:{agent_id}:{sess_id}" if (tenant_id or agent_id) else session_key
+                    item_id = hashlib.sha256(f"{scope_str}:{session_key}:{content}".encode()).hexdigest()
                     exists = conn.execute("SELECT 1 FROM items WHERE item_id=?", (item_id,)).fetchone()
                     if not exists:
                         title = content.replace("\n", " ")[:80]

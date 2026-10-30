@@ -61,8 +61,9 @@ class DamingAdapter:
     def compact_context(self, context: AgentContext, max_tokens: int = 2_000,
                         keep_turns: int = 10) -> Any:
         """Return a bounded context window for hook-capable non-OpenClaw hosts."""
+        scope = MemoryScope(context.tenant_id, context.agent_id, context.session_id)
         return self.memory.hot_journal.context_window(
-            context.session_id, max_tokens=max_tokens, keep_turns=keep_turns,
+            scope.scoped_key(context.session_id), max_tokens=max_tokens, keep_turns=keep_turns,
         )
 
     def on_error(self, error: Exception, context: AgentContext) -> None:
