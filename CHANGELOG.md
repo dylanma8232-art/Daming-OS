@@ -185,3 +185,12 @@ All notable changes to this project will be documented in this file.
 - daming_os/memory/core.py
 - daming_os/memory/governance.py
 - tests/test_governance_and_workflow.py
+
+## 2026-10-30 03:54 迭代
+
+- **PR**：71 Fix L2 semantic cache cross-tenant leakage and revalidate cached results
+- **链接**：https://github.com/dylanma8232-art/Daming-OS/pull/71
+- **改动文件**：
+- daming_os/memory/cache.py
+- daming_os/memory/core.py
+- tests/test_semantic_cache_isolation.py
