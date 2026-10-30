@@ -92,7 +92,13 @@ class MemoryPolicy:
 
 
 def visible_to_scope(metadata: Dict[str, Any], scope: Optional[MemoryScope]) -> bool:
-    """Prevent a scoped query from returning another tenant's record."""
-    if scope is None or scope.tenant_id is None:
+    """Prevent a scoped query from returning another tenant's, agent's, or session's record."""
+    if scope is None:
         return True
-    return metadata.get("tenant_id") == scope.tenant_id
+    if scope.tenant_id is not None and metadata.get("tenant_id") != scope.tenant_id:
+        return False
+    if scope.agent_id is not None and metadata.get("agent_id") != scope.agent_id:
+        return False
+    if scope.session_id is not None and metadata.get("session_id") != scope.session_id:
+        return False
+    return True
