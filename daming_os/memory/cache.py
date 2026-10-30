@@ -148,6 +148,7 @@ class HardenedSemanticCache:
         best_similarity = -1.0
 
         norm_q = math.sqrt(sum(a * a for a in query_vector))
+        query_scope = _get_scope_prefix(query)
 
         for key, entry in l2_cache.items():
             entry_scope_key = entry.get("scope_key") if isinstance(entry, dict) and "scope_key" in entry else self._resolve_scope_key(key)
