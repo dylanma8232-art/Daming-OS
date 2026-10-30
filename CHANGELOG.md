@@ -233,3 +233,11 @@ All notable changes to this project will be documented in this file.
 - tests/test_scoped_session_isolation.py
 - tests/test_semantic_cache_isolation.py
 - tests/test_workflow_security.py
+
+## 2026-10-30 06:21 迭代
+
+- **PR**：72 Fix semantic cache cross-tenant leakage
+- **链接**：https://github.com/dylanma8232-art/Daming-OS/pull/72
+- **改动文件**：
+- daming_os/memory/cache.py
+- tests/test_semantic_cache_isolation.py
