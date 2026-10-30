@@ -7,6 +7,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  issues: write
   checks: read
 
 concurrency:
@@ -100,6 +101,21 @@ jobs:
           done
           echo "::error::CI did not complete within 30 min, not merging."
           exit 1
+
+      - name: Close linked issues
+        if: steps.identify.outputs.is_jules == 'true'
+        env:
+          REPO: ${{ github.repository }}
+          NUM: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Jules 的 PR 不写 "Fixes #N"，按 Jules 在 Issue 里留下的 PR 链接找到对应 Issue 并关闭
+          for ISSUE in $(gh api "repos/$REPO/issues?state=open&labels=jules&per_page=100" -q '.[] | select(.pull_request == null) | .number'); do
+            if gh api "repos/$REPO/issues/$ISSUE/comments?per_page=100" -q '.[].body' | grep -Eq "/pull/${NUM}([^0-9]|$)"; then
+              gh issue comment "$ISSUE" -R "$REPO" --body "已由 #${NUM} 修复并合并，自动关闭。" || true
+              gh issue close "$ISSUE" -R "$REPO" --reason completed || true
+            fi
+          done
 
       - name: Checkout main for iteration log
         if: steps.identify.outputs.is_jules == 'true'
