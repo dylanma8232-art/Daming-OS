@@ -114,9 +114,6 @@ class WikiSynchronizer:
 
     def sync(self) -> Dict[str, int]:
         self.local.mkdir(parents=True, exist_ok=True)
-        local_docs = {str(path.relative_to(self.local)): path.read_text(encoding="utf-8")
-                      for path in self.local.rglob("*.md")}
-        self.provider.push(local_docs)
         pulled = self.provider.pull()
         changed = 0
         created_dirs = set()
@@ -129,6 +126,9 @@ class WikiSynchronizer:
                     created_dirs.add(target.parent)
                 target.write_text(content, encoding="utf-8")
                 changed += 1
+        local_docs = {str(path.relative_to(self.local)): path.read_text(encoding="utf-8")
+                      for path in self.local.rglob("*.md")}
+        self.provider.push(local_docs)
         return {"pushed": len(local_docs), "pulled": len(pulled), "changed": changed}
 
 

@@ -333,6 +333,32 @@ class TestPortableRuntime(unittest.TestCase):
             sync = WikiSynchronizer(str(local), FilesystemWikiProvider(str(root / "mirror")))
             self.assertEqual(sync.sync()["pushed"], 1)
 
+    def test_wiki_synchronizer_pulls_remote_edits_before_pushing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            local = root / "local_wiki"
+            mirror = root / "mirror_wiki"
+            (local / "doc.md").parent.mkdir(parents=True, exist_ok=True)
+            (local / "doc.md").write_text("local initial", encoding="utf-8")
+
+            provider = FilesystemWikiProvider(str(mirror))
+            synchronizer = WikiSynchronizer(str(local), provider)
+
+            # First sync populates mirror
+            result = synchronizer.sync()
+            self.assertEqual(result["pushed"], 1)
+            self.assertEqual((mirror / "doc.md").read_text(encoding="utf-8"), "local initial")
+
+            # Remote side edits the document
+            (mirror / "doc.md").write_text("remote edited", encoding="utf-8")
+
+            # Local side also makes an update or remains unchanged;
+            # Sync should pull remote edit first so local reads "remote edited" and does not overwrite it with old state
+            result2 = synchronizer.sync()
+            self.assertEqual(result2["changed"], 1)
+            self.assertEqual((local / "doc.md").read_text(encoding="utf-8"), "remote edited")
+            self.assertEqual((mirror / "doc.md").read_text(encoding="utf-8"), "remote edited")
+
     def test_standalone_runtime_persists_events_and_runs_otp_gated_evolution(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
