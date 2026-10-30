@@ -241,3 +241,11 @@ All notable changes to this project will be documented in this file.
 - **改动文件**：
 - daming_os/memory/cache.py
 - tests/test_semantic_cache_isolation.py
+
+## 2026-10-30 06:26 迭代
+
+- **PR**：75 Block dangerous built-in function calls in sandbox AST validation
+- **链接**：https://github.com/dylanma8232-art/Daming-OS/pull/75
+- **改动文件**：
+- daming_os/growth/sandbox.py
+- tests/test_sandbox_security.py
