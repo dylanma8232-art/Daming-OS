@@ -81,7 +81,7 @@ jobs:
         run: |
           echo "Waiting for CI on $PR_URL (sha=$SHA)..."
           for i in $(seq 1 90); do
-            CONC=$(gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100" -q '[.check_runs[] | select(.name=="ci")] | sort_by(.started_at // "0") | .[-1].conclusion // "pending"' 2>/dev/null || echo pending)
+            CONC=$(gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100" -q '[.check_runs[] | select((.name | ascii_downcase) == "ci" or (.name | ascii_downcase | contains("ci")))] | sort_by(.started_at // "0") | .[-1].conclusion // "pending"' 2>/dev/null || echo pending)
             case "$CONC" in
               success)
                 echo "CI passed, merging..."
