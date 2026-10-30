@@ -32,6 +32,16 @@ class TestMemoryGovernance(unittest.TestCase):
         self.assertNotIn("test-value", metadata["note"])
         self.assertTrue(visible_to_scope(metadata, MemoryScope(tenant_id="tenant-a")))
         self.assertFalse(visible_to_scope(metadata, MemoryScope(tenant_id="tenant-b")))
+        self.assertTrue(visible_to_scope(metadata, MemoryScope(agent_id="agent-1")))
+        self.assertFalse(visible_to_scope(metadata, MemoryScope(agent_id="agent-2")))
+        self.assertFalse(visible_to_scope(metadata, MemoryScope(session_id="session-1")))
+
+        content2, metadata2 = policy.prepare(
+            "test content", {},
+            MemoryScope(tenant_id="tenant-a", agent_id="agent-1", session_id="session-1"), now,
+        )
+        self.assertTrue(visible_to_scope(metadata2, MemoryScope(tenant_id="tenant-a", agent_id="agent-1", session_id="session-1")))
+        self.assertFalse(visible_to_scope(metadata2, MemoryScope(tenant_id="tenant-a", agent_id="agent-1", session_id="session-2")))
         self.assertTrue(policy.is_expired(metadata, now + timedelta(days=2)))
 
 

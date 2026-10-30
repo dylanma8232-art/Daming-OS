@@ -238,9 +238,9 @@ class MemorySystem:
             item_id = item.get("id", "")
             meta = meta_dict.get(item_id)
             # Legacy records without scope metadata are intentionally invisible
-            # to a tenant-scoped query; leaking an old unscoped record is worse
+            # to a scoped query; leaking an old unscoped record is worse
             # than requiring one migration/consolidation pass.
-            if scope and scope.tenant_id and not meta:
+            if scope and (scope.tenant_id or scope.agent_id or scope.session_id) and not meta:
                 continue
             if meta:
                 if not visible_to_scope(meta.get("metadata", {}), scope):
