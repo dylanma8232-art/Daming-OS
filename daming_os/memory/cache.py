@@ -143,10 +143,10 @@ class HardenedSemanticCache:
         if len(query) < self.l_min or query_vector is None:
             self.hit_history.append(0)
             return None
-            
+
         best_match_key = None
         best_similarity = -1.0
-        
+
         norm_q = math.sqrt(sum(a * a for a in query_vector))
 
         for key, entry in l2_cache.items():

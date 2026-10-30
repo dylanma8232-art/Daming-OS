@@ -213,3 +213,23 @@ All notable changes to this project will be documented in this file.
 - daming_os/memory/core.py
 - daming_os/memory/governance.py
 - tests/test_scoped_session_isolation.py
+
+## 2026-10-30 04:41 迭代
+
+- **PR**：69 Isolate L2 semantic cache search by scope prefix
+- **链接**：https://github.com/dylanma8232-art/Daming-OS/pull/69
+- **改动文件**：
+- .github/workflows/auto-merge-jules.yml
+- CHANGELOG.md
+- daming_os/adapter.py
+- daming_os/memory/cache.py
+- daming_os/memory/consolidator.py
+- daming_os/memory/core.py
+- daming_os/memory/governance.py
+- daming_os/memory/services.py
+- tests/test_governance_and_workflow.py
+- tests/test_hot_memory_security.py
+- tests/test_portable_runtime.py
+- tests/test_scoped_session_isolation.py
+- tests/test_semantic_cache_isolation.py
+- tests/test_workflow_security.py
