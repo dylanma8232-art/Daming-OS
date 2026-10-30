@@ -305,11 +305,17 @@ class MemorySystem:
         clean_content, clean_metadata = self.policy.prepare(content, metadata, scope)
         logger.info("Stored context into 大明记忆系统. Scope: %s", scope)
         data = {"content": clean_content, "meta": clean_metadata}
-        hot_written = self.hot_state.write_memory(session_key, data)
-        self.hot_journal.append(session_key, clean_content,
+        effective_scope = scope or MemoryScope(
+            tenant_id=clean_metadata.get("tenant_id"),
+            agent_id=clean_metadata.get("agent_id"),
+            session_id=clean_metadata.get("session_id") or session_key,
+        )
+        effective_key = effective_scope.scoped_key(session_key)
+        hot_written = self.hot_state.write_memory(effective_key, data)
+        self.hot_journal.append(effective_key, clean_content,
                                 tool_calls=clean_metadata.get("tool_calls", []),
                                 state_diff=clean_metadata.get("state_diff", {}))
-        queued = queue_incoming_memory(session_key, data, db_path=self.sqlite_path)
+        queued = queue_incoming_memory(effective_key, data, db_path=self.sqlite_path)
         return hot_written and queued
 
     def promote_pending_memories(self) -> int:
