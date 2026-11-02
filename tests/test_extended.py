@@ -3,7 +3,53 @@ import json
 import os
 from pathlib import Path
 
-from daming_os.memory.extended import SicaGuard
+import sqlite3
+from daming_os.memory.extended import SicaGuard, FTSRebuilder
+
+def test_ftsrebuilder_no_items_table(tmp_path):
+    db_path = tmp_path / "memory_meta.db"
+    rebuilder = FTSRebuilder(str(db_path))
+
+    result = rebuilder.rebuild()
+
+    assert result == {"indexed": 0}
+
+    # Verify memory_fts table was created but is empty
+    conn = sqlite3.connect(str(db_path))
+    cursor = conn.cursor()
+    cursor.execute("SELECT count(*) FROM memory_fts")
+    count = cursor.fetchone()[0]
+    assert count == 0
+    conn.close()
+
+def test_ftsrebuilder_with_items(tmp_path):
+    db_path = tmp_path / "memory_meta.db"
+
+    # Create database and items table with some data
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("CREATE TABLE items (item_id TEXT, content TEXT)")
+    conn.execute("INSERT INTO items VALUES ('id1', 'first content')")
+    conn.execute("INSERT INTO items VALUES ('id2', 'second content')")
+    conn.commit()
+    conn.close()
+
+    rebuilder = FTSRebuilder(str(db_path))
+
+    # Rebuild FTS
+    result = rebuilder.rebuild()
+
+    assert result == {"indexed": 2}
+
+    # Verify memory_fts table contains the data
+    conn = sqlite3.connect(str(db_path))
+    cursor = conn.cursor()
+    cursor.execute("SELECT item_id, content FROM memory_fts ORDER BY item_id")
+    rows = cursor.fetchall()
+
+    assert len(rows) == 2
+    assert rows[0] == ('id1', 'first content')
+    assert rows[1] == ('id2', 'second content')
+    conn.close()
 
 def test_sicaguard_snapshot(tmp_path):
     log_file = tmp_path / "sica.log"
