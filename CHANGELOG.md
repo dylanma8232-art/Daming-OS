@@ -249,3 +249,15 @@ All notable changes to this project will be documented in this file.
 - **改动文件**：
 - daming_os/growth/sandbox.py
 - tests/test_sandbox_security.py
+
+## 2026-11-02 04:02 迭代
+
+- **PR**：76 Fix growth sandbox security, unapproved execution timing, and thread leak
+- **链接**：https://github.com/dylanma8232-art/Daming-OS/pull/76
+- **改动文件**：
+- daming_os/growth/deployment.py
+- daming_os/growth/orchestrator.py
+- daming_os/growth/sandbox.py
+- daming_os/growth/workflow.py
+- daming_os/memory/cache.py.orig
+- tests/test_sandbox_security.py
