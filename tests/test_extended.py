@@ -3,7 +3,71 @@ import json
 import os
 from pathlib import Path
 
-from daming_os.memory.extended import SicaGuard
+import sqlite3
+
+from daming_os.memory.extended import SicaGuard, FTSRebuilder
+
+
+def test_ftsrebuilder_no_items_table(tmp_path):
+    db_path = tmp_path / "metadata.db"
+    rebuilder = FTSRebuilder(str(db_path))
+
+    # Should run successfully even if the database is brand new and has no items table
+    result = rebuilder.rebuild()
+    assert result["indexed"] == 0
+
+    # Ensure the memory_fts table is created correctly
+    conn = sqlite3.connect(str(db_path))
+    tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    table_names = [t[0] for t in tables]
+    assert "memory_fts" in table_names
+    conn.close()
+
+
+def test_ftsrebuilder_empty_items_table(tmp_path):
+    db_path = tmp_path / "metadata.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("CREATE TABLE items (item_id TEXT, content TEXT)")
+    conn.commit()
+    conn.close()
+
+    rebuilder = FTSRebuilder(str(db_path))
+    result = rebuilder.rebuild()
+    assert result["indexed"] == 0
+
+    conn = sqlite3.connect(str(db_path))
+    count = conn.execute("SELECT COUNT(*) FROM memory_fts").fetchone()[0]
+    assert count == 0
+    conn.close()
+
+
+def test_ftsrebuilder_with_items(tmp_path):
+    db_path = tmp_path / "metadata.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("CREATE TABLE items (item_id TEXT, content TEXT)")
+    conn.executemany("INSERT INTO items (item_id, content) VALUES (?, ?)", [
+        ("id1", "This is some test content about AI."),
+        ("id2", "Another item for full text search."),
+    ])
+
+    # Also simulate an existing memory_fts to ensure it gets cleared out
+    conn.execute("CREATE VIRTUAL TABLE memory_fts USING fts5(item_id, content)")
+    conn.execute("INSERT INTO memory_fts (item_id, content) VALUES (?, ?)", ("old_id", "old content"))
+    conn.commit()
+    conn.close()
+
+    rebuilder = FTSRebuilder(str(db_path))
+    result = rebuilder.rebuild()
+    assert result["indexed"] == 2
+
+    # Verify everything was updated correctly
+    conn = sqlite3.connect(str(db_path))
+    rows = conn.execute("SELECT item_id, content FROM memory_fts ORDER BY item_id").fetchall()
+    assert len(rows) == 2
+    assert rows[0] == ("id1", "This is some test content about AI.")
+    assert rows[1] == ("id2", "Another item for full text search.")
+    conn.close()
+
 
 def test_sicaguard_snapshot(tmp_path):
     log_file = tmp_path / "sica.log"
