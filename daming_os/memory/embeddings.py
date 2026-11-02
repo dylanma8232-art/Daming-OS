@@ -19,6 +19,8 @@ class OpenAICompatibleEmbeddingProvider:
         self.api_key = api_key or os.getenv(api_key_env, "")
 
     def embed(self, text: str) -> List[float]:
+        if not self.base_url.startswith("https://"):
+            raise ValueError("base_url must be a secure HTTPS endpoint")
         if not self.api_key:
             raise RuntimeError("An embedding API key is required")
         request = urllib.request.Request(
