@@ -131,6 +131,29 @@ class MemorySystem:
     def close(self) -> None:
         bus.unsubscribe(EvolutionCompletedEvent, self._on_evolution_completed)
 
+    def _aggregate_multi_turn_context(self, text: str, messages: Optional[List[Dict[str, Any]]]) -> str:
+        if not messages or not isinstance(messages, list):
+            return text
+
+        user_texts = []
+        for msg in reversed(messages):
+            if not isinstance(msg, dict) or msg.get("role") != "user":
+                continue
+            content = msg.get("content", "")
+            if not isinstance(content, str) or not content.strip():
+                continue
+
+            user_texts.insert(0, content.strip())
+            if len(user_texts) >= 3:
+                break
+
+        if not user_texts:
+            return text
+
+        aggregated_query = "\n".join(user_texts)
+        logger.info(f"Multi-turn context aggregated: {repr(aggregated_query)}")
+        return aggregated_query
+
     def query(self, text: str, options: Optional[QueryOptions] = None, *,
               context: Optional[QueryContext] = None) -> List[Dict[str, Any]]:
         """
@@ -148,19 +171,7 @@ class MemorySystem:
         scope = options.scope
 
         # 针对多轮会话追问进行前置上下文拼接，消除指代失忆
-        recall_query = text
-        if messages and isinstance(messages, list):
-            user_texts = []
-            for msg in reversed(messages):
-                if isinstance(msg, dict) and msg.get("role") == "user":
-                    content = msg.get("content", "")
-                    if isinstance(content, str) and content.strip():
-                        user_texts.insert(0, content.strip())
-                        if len(user_texts) >= 3:
-                            break
-            if user_texts:
-                recall_query = "\n".join(user_texts)
-                logger.info(f"Multi-turn context aggregated: {repr(recall_query)}")
+        recall_query = self._aggregate_multi_turn_context(text, messages)
 
         # The complete isolation scope belongs to the cache key.  A tenant-only
         # key could still leak an agent or session scoped result.
