@@ -74,6 +74,60 @@ class DamingRuntime:
         # relative paths.  Bootstrap it before constructing the adapter so a
         # standalone runtime really writes under the requested workspace.
         config.WORKSPACE_ROOT = str(self.workspace)
+        self._init_memory_subsystems(adapter, wiki_provider)
+
+        self.growth_ledger = GrowthLedger()
+        self._init_growth_subsystems(auditor, approval_notifier)
+        self._init_scheduling(runtime_config, skill_dirs, daily_digest_enabled, watchdog_enabled, start_scheduler)
+
+    def _init_scheduling(self, runtime_config: Dict[str, Any], skill_dirs: Iterable[str],
+                         daily_digest_enabled: bool, watchdog_enabled: bool,
+                         start_scheduler: bool) -> None:
+        self.scheduler = DurableScheduler(
+            str(self.workspace / ".daming-os" / "scheduler-state.json"),
+            timezone_name=str(runtime_config.get("timezone", "local")),
+        )
+        self._approval_reminder_state = self.workspace / ".daming-os" / "approval-reminders.json"
+        self.skills = SkillLazyLoader([str(self.workspace / "skills" / "auto-generated"), *skill_dirs])
+        self.skills.discover()
+        self.scheduler.schedule("daily-maintenance", "daily@02:30", self._run_daily_maintenance)
+        self.scheduler.schedule("weekly-governance", "weekly@Sun@23:30", self._run_weekly_governance)
+        if daily_digest_enabled:
+            self.scheduler.schedule("daily-digest", "daily@23:00", self._run_daily_digest)
+        if watchdog_enabled:
+            self.scheduler.schedule("watchdog", "every:1800", self._run_watchdog)
+        self.scheduler.defer_new_jobs()
+        self.hooks = DamingHookBridge(adapter=self.adapter, before_turn_callback=self._consume_command,
+                                      after_turn_callback=self.tick, skill_context_callback=self._skill_context)
+        if start_scheduler:
+            self.start_scheduler()
+
+    def _init_growth_subsystems(self, auditor: Optional[BuilderReviewerAudit], approval_notifier: Optional[ApprovalNotifier]) -> None:
+        self.evolution_workflow = EvolutionWorkflow(
+            self.proposals,
+            WorkspaceProposalValidator(str(self.workspace)),
+            LedgerApprovalProvider(self.growth_ledger),
+            AtomicWorkspaceDeployer(str(self.workspace)),
+            SyntaxVerifier(),
+        )
+        self.experiences = ExperienceStore()
+        self.growth_pipeline = GrowthEventPipeline(self.experiences)
+        self.workflow_distillation = WorkflowDistillation(
+            self.experiences, str(self.workspace / "skills" / "auto-generated"))
+        self.meta_prompt = MetaPromptRewriter(str(self.workspace / "memory" / "meta-prompts"), self.proposals)
+        self.xuexi = XuexiCommandListener(self.experiences)
+        self.council = ThreePartyCouncil(str(self.workspace / "memory" / "council-audit.jsonl"))
+        self.graph = KnowledgeGraph(str(self.workspace / "memory" / "memory_meta.db"))
+        self.growth = GrowthCoordinator(self.proposals, self.growth_ledger,
+                                        auditor=auditor or self.council,
+                                        workflow=self.evolution_workflow,
+                                        notifier=approval_notifier or JsonlApprovalNotifier(
+                                            str(self.workspace / "memory" / "approval-outbox.jsonl")))
+        self.growth_health = GrowthHealthInspector()
+        self.quality = QualityGate()
+        self.release_ledger = ReleaseLedger(str(self.workspace / "memory" / "version-changelog.jsonl"))
+
+    def _init_memory_subsystems(self, adapter: Optional[DamingAdapter], wiki_provider: Optional[WikiSyncProvider]) -> None:
         bus.configure_log_path(str(self.workspace / "memory" / "event_logs.jsonl"))
         self.memory_migration = MemoryMigrator(str(self.workspace))
         self.memory_migration.initialize()
@@ -98,49 +152,6 @@ class DamingRuntime:
             str(self.workspace / "wiki" / "main"),
             wiki_provider or FilesystemWikiProvider(str(self.workspace / "memory" / "wiki-mirror")),
         )
-
-        self.growth_ledger = GrowthLedger()
-        self.evolution_workflow = EvolutionWorkflow(
-            self.proposals,
-            WorkspaceProposalValidator(str(self.workspace)),
-            LedgerApprovalProvider(self.growth_ledger),
-            AtomicWorkspaceDeployer(str(self.workspace)),
-            SyntaxVerifier(),
-        )
-        self.experiences = ExperienceStore()
-        self.growth_pipeline = GrowthEventPipeline(self.experiences)
-        self.workflow_distillation = WorkflowDistillation(
-            self.experiences, str(self.workspace / "skills" / "auto-generated"))
-        self.meta_prompt = MetaPromptRewriter(str(self.workspace / "memory" / "meta-prompts"), self.proposals)
-        self.xuexi = XuexiCommandListener(self.experiences)
-        self.council = ThreePartyCouncil(str(self.workspace / "memory" / "council-audit.jsonl"))
-        self.graph = KnowledgeGraph(str(self.workspace / "memory" / "memory_meta.db"))
-        self.growth = GrowthCoordinator(self.proposals, self.growth_ledger,
-                                        auditor=auditor or self.council,
-                                        workflow=self.evolution_workflow,
-                                        notifier=approval_notifier or JsonlApprovalNotifier(
-                                            str(self.workspace / "memory" / "approval-outbox.jsonl")))
-        self.growth_health = GrowthHealthInspector()
-        self.quality = QualityGate()
-        self.release_ledger = ReleaseLedger(str(self.workspace / "memory" / "version-changelog.jsonl"))
-        self.scheduler = DurableScheduler(
-            str(self.workspace / ".daming-os" / "scheduler-state.json"),
-            timezone_name=str(runtime_config.get("timezone", "local")),
-        )
-        self._approval_reminder_state = self.workspace / ".daming-os" / "approval-reminders.json"
-        self.skills = SkillLazyLoader([str(self.workspace / "skills" / "auto-generated"), *skill_dirs])
-        self.skills.discover()
-        self.scheduler.schedule("daily-maintenance", "daily@02:30", self._run_daily_maintenance)
-        self.scheduler.schedule("weekly-governance", "weekly@Sun@23:30", self._run_weekly_governance)
-        if daily_digest_enabled:
-            self.scheduler.schedule("daily-digest", "daily@23:00", self._run_daily_digest)
-        if watchdog_enabled:
-            self.scheduler.schedule("watchdog", "every:1800", self._run_watchdog)
-        self.scheduler.defer_new_jobs()
-        self.hooks = DamingHookBridge(adapter=self.adapter, before_turn_callback=self._consume_command,
-                                      after_turn_callback=self.tick, skill_context_callback=self._skill_context)
-        if start_scheduler:
-            self.start_scheduler()
 
     def _runtime_config(self) -> Dict[str, Any]:
         """Read optional plugin settings without coupling the host to env files."""
