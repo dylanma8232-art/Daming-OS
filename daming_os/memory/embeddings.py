@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import urllib.request
+import urllib.parse
 import hashlib
 from typing import List, Optional, Protocol
 
@@ -21,6 +22,8 @@ class OpenAICompatibleEmbeddingProvider:
     def embed(self, text: str) -> List[float]:
         if not self.api_key:
             raise RuntimeError("An embedding API key is required")
+        if urllib.parse.urlparse(self.base_url).scheme.lower() not in ("http", "https"):
+            raise ValueError(f"Invalid base_url scheme. Only http/https are allowed: {self.base_url}")
         request = urllib.request.Request(
             self.base_url + "/embeddings",
             data=json.dumps({"model": self.model, "input": text[:8000]}).encode(),
