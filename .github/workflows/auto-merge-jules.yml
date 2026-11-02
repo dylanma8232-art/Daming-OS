@@ -205,7 +205,7 @@ jobs:
                     end')
                 case "$CONC" in
                   success)
-                    echo "All GitHub Actions checks passed (mergeable_state=$MERGEABLE_STATE)."
+                    echo "All GitHub Actions checks passed (mergeStateStatus=$MERGEABLE_STATE)."
                     return 0
                     ;;
                   failure)
@@ -213,11 +213,11 @@ jobs:
                     return 1
                     ;;
                   *)
-                    echo "CI still pending (poll $((i+1))/80, mergeable_state=$MERGEABLE_STATE)..."
+                    echo "CI still pending (poll $((i+1))/80, mergeStateStatus=$MERGEABLE_STATE)..."
                     ;;
                 esac
               else
-                echo "mergeable_state=$MERGEABLE_STATE (poll $((i+1))/80), waiting..."
+                echo "mergeStateStatus=$MERGEABLE_STATE (poll $((i+1))/80), waiting..."
               fi
 
               i=$((i+1))
