@@ -155,17 +155,17 @@ jobs:
           wait_for_ci() {
             local i=0
             while [ "$i" -lt 80 ]; do
-              PR_STATE=$(gh pr view "$PR_NUMBER" -R "$REPO" --json state,mergeable,mergeable_state -q '[.state, .mergeable, .mergeable_state] | @tsv')
+              PR_JSON=$(gh api "repos/$REPO/pulls/$PR_NUMBER")
+              STATE=$(printf '%s' "$PR_JSON" | jq -r '.state')
 
               # 期间被合并/关闭则直接成功退出
-              STATE=$(printf '%s' "$PR_STATE" | cut -f1)
-              if [ "$STATE" != "OPEN" ]; then
+              if [ "$STATE" != "open" ]; then
                 echo "PR state is $STATE, nothing to merge."
                 return 0
               fi
 
-              MERGEABLE=$(printf '%s' "$PR_STATE" | cut -f2)
-              MERGEABLE_STATE=$(printf '%s' "$PR_STATE" | cut -f3)
+              MERGEABLE=$(printf '%s' "$PR_JSON" | jq -r '.mergeable')
+              MERGEABLE_STATE=$(printf '%s' "$PR_JSON" | jq -r '.mergeable_state')
 
               # dirty: 与 main 有冲突。先尝试自动更新分支（update_pull_request_branch
               # 对无真实冲突、只是 base 前移的 PR 有效；真实冲突则保持失败等待人工）。
@@ -173,8 +173,8 @@ jobs:
                 echo "PR is conflicted (state=$MERGEABLE_STATE); trying update_pull_request_branch..."
                 gh api -X PUT "repos/$REPO/pulls/$PR_NUMBER/update-branch" -f update_method="merge" >/dev/null 2>&1 || true
                 sleep 10
-                NEW_STATE=$(gh pr view "$PR_NUMBER" -R "$REPO" --json state,mergeable,mergeable_state -q '[.state, .mergeable, .mergeable_state] | @tsv')
-                NEW_MERGEABLE=$(printf '%s' "$NEW_STATE" | cut -f2)
+                NEW_JSON=$(gh api "repos/$REPO/pulls/$PR_NUMBER")
+                NEW_MERGEABLE=$(printf '%s' "$NEW_JSON" | jq -r '.mergeable')
                 if [ "$NEW_MERGEABLE" = "false" ]; then
                   echo "::error::Branch update did not resolve conflicts; needs manual resolution."
                   return 3
