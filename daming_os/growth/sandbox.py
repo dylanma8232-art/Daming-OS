@@ -75,13 +75,15 @@ class SandboxGate:
             if not os.path.exists(self.sandbox_dir):
                 return
             for entry in os.listdir(self.sandbox_dir):
-                if entry.startswith("evo-"):
-                    entry_path = os.path.join(self.sandbox_dir, entry)
-                    if os.path.isdir(entry_path):
-                        stat = os.stat(entry_path)
-                        if now - stat.st_mtime > max_age_seconds:
-                            shutil.rmtree(entry_path, ignore_errors=True)
-                            logger.info(f"GC cleaned up sandbox: {entry_path}")
+                if not entry.startswith("evo-"):
+                    continue
+                entry_path = os.path.join(self.sandbox_dir, entry)
+                if not os.path.isdir(entry_path):
+                    continue
+                stat = os.stat(entry_path)
+                if now - stat.st_mtime > max_age_seconds:
+                    shutil.rmtree(entry_path, ignore_errors=True)
+                    logger.info(f"GC cleaned up sandbox: {entry_path}")
         except Exception as e:
             logger.error(f"GC Error: {e}")
 
