@@ -8,9 +8,12 @@ and approval chain as ordinary growth events.
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import os
 import re
+import socket
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -62,6 +65,20 @@ class LLMCouncilRole:
         )
         try:
             url = f"{self.base_url}/chat/completions"
+
+            parsed_url = urllib.parse.urlparse(url)
+            if parsed_url.scheme not in ("http", "https"):
+                raise ValueError(f"Invalid URL scheme: {parsed_url.scheme}")
+
+            if parsed_url.hostname:
+                try:
+                    ip = socket.gethostbyname(parsed_url.hostname)
+                    parsed_ip = ipaddress.ip_address(ip)
+                    if parsed_ip.is_private or parsed_ip.is_loopback:
+                        raise ValueError(f"Invalid URL hostname: {parsed_url.hostname} resolves to private/loopback IP {ip}")
+                except Exception as e:
+                    raise ValueError(f"Invalid URL hostname: {e}")
+
             payload = {
                 "model": self.model,
                 "messages": [{"role": "user", "content": prompt}],
