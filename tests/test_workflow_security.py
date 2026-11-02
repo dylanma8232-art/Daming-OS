@@ -63,7 +63,10 @@ class TestWorkflowSecurity(unittest.TestCase):
                     outputs[k] = v
             output_file.unlink()
 
-        return res.returncode, outputs, res.stdout
+        # 诊断信息现在写到 stderr（stdout 只保留 is_jules 输出）
+        diagnostics = res.stdout + res.stderr
+
+        return res.returncode, outputs, diagnostics
 
     def test_fork_pr_with_jules_text_is_rejected(self):
         # A fork PR trying to spoof Jules body text
