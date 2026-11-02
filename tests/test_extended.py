@@ -3,7 +3,37 @@ import json
 import os
 from pathlib import Path
 
-from daming_os.memory.extended import SicaGuard
+from daming_os.memory.extended import PathScopedRules, SicaGuard
+
+
+def test_path_scoped_rules_empty():
+    rules = PathScopedRules()
+    assert rules.rules_for("some/path") == []
+
+
+def test_path_scoped_rules_matching():
+    rules_dict = {
+        str(Path("src/")): ["rule1", "rule2"],
+        str(Path("tests/")): ["rule3"],
+    }
+    rules = PathScopedRules(rules_dict)
+
+    assert set(rules.rules_for("src/main.py")) == {"rule1", "rule2"}
+    assert set(rules.rules_for("tests/test_main.py")) == {"rule3"}
+
+    assert rules.rules_for("docs/readme.md") == []
+
+
+def test_path_scoped_rules_multiple_matches():
+    rules_dict = {
+        str(Path("src/")): ["rule1"],
+        str(Path("src/module/")): ["rule2"],
+    }
+    rules = PathScopedRules(rules_dict)
+
+    assert set(rules.rules_for("src/module/file.py")) == {"rule1", "rule2"}
+    assert set(rules.rules_for("src/other.py")) == {"rule1"}
+
 
 def test_sicaguard_snapshot(tmp_path):
     log_file = tmp_path / "sica.log"
