@@ -45,6 +45,22 @@ class HardenedSQLiteManager:
         conn.row_factory = sqlite3.Row
         return conn
 
+    def _extract_item_meta(self, row: sqlite3.Row) -> Dict[str, Any]:
+        metadata = {}
+        if "metadata_json" in row.keys() and row["metadata_json"]:
+            try:
+                metadata = json.loads(row["metadata_json"])
+            except Exception as parse_e:
+                # Use item_id if available, otherwise just log the error
+                item_id = row["item_id"] if "item_id" in row.keys() else "unknown"
+                logger.warning(f"Failed to parse metadata_json for {item_id}: {parse_e}")
+
+        return {
+            "importance": row["importance"],
+            "category": row["category"],
+            "metadata": metadata
+        }
+
     def get_adjacency_list(self) -> Dict[str, List[Dict[str, Any]]]:
         """从 SQLite wiki_edges 加载邻接表，并根据 link_type 进行多维语义扩散加权"""
         adj_list = {}
@@ -118,11 +134,7 @@ class HardenedSQLiteManager:
                 )
                 row = cursor.fetchone()
                 if row:
-                    metadata = {}
-                    if "metadata_json" in row.keys() and row["metadata_json"]:
-                        metadata = json.loads(row["metadata_json"])
-                    return {"importance": row["importance"], "category": row["category"],
-                            "metadata": metadata}
+                    return self._extract_item_meta(row)
         except Exception as e:
             logger.warning(f"Failed to get item meta for {item_id}: {e}")
         return None
@@ -152,17 +164,7 @@ class HardenedSQLiteManager:
                     )
 
                     for row in cursor.fetchall():
-                        metadata = {}
-                        if "metadata_json" in row.keys() and row["metadata_json"]:
-                            try:
-                                metadata = json.loads(row["metadata_json"])
-                            except Exception as parse_e:
-                                logger.warning(f"Failed to parse metadata_json for {row['item_id']}: {parse_e}")
-                        result[row["item_id"]] = {
-                            "importance": row["importance"],
-                            "category": row["category"],
-                            "metadata": metadata
-                        }
+                        result[row["item_id"]] = self._extract_item_meta(row)
                 return result
         except Exception as e:
             logger.warning(f"Failed to get items meta: {e}")
