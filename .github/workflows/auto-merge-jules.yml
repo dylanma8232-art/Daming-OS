@@ -147,7 +147,7 @@ jobs:
           echo "Waiting for CI on PR #$PR_NUMBER (sha=$SHA)..."
 
           # 关键 3：不再按 check-run 名字猜测 CI 结论。
-          # 轮询 PR 自身的 mergeable_state + head SHA 的 check-runs 总体结论：
+          # 轮询 PR 自身的 mergeStateStatus + head SHA 的 check-runs 总体结论：
           # - 全部 check 完成：按 PR 视角聚合判断（success / neutral / skipped 视为通过）
           # - 有失败：不合并，退出
           # - 未完成：继续等待
@@ -155,7 +155,7 @@ jobs:
           wait_for_ci() {
             local i=0
             while [ "$i" -lt 80 ]; do
-              PR_STATE=$(gh pr view "$PR_NUMBER" -R "$REPO" --json state,mergeable,mergeable_state -q '[.state, .mergeable, .mergeable_state] | @tsv')
+              PR_STATE=$(gh pr view "$PR_NUMBER" -R "$REPO" --json state,mergeable,mergeStateStatus -q '[.state, .mergeable, .mergeStateStatus] | @tsv')
 
               # 期间被合并/关闭则直接成功退出
               STATE=$(printf '%s' "$PR_STATE" | cut -f1)
@@ -173,7 +173,7 @@ jobs:
                 echo "PR is conflicted (state=$MERGEABLE_STATE); trying update_pull_request_branch..."
                 gh api -X PUT "repos/$REPO/pulls/$PR_NUMBER/update-branch" -f update_method="merge" >/dev/null 2>&1 || true
                 sleep 10
-                NEW_STATE=$(gh pr view "$PR_NUMBER" -R "$REPO" --json state,mergeable,mergeable_state -q '[.state, .mergeable, .mergeable_state] | @tsv')
+                NEW_STATE=$(gh pr view "$PR_NUMBER" -R "$REPO" --json state,mergeable,mergeStateStatus -q '[.state, .mergeable, .mergeStateStatus] | @tsv')
                 NEW_MERGEABLE=$(printf '%s' "$NEW_STATE" | cut -f2)
                 if [ "$NEW_MERGEABLE" = "false" ]; then
                   echo "::error::Branch update did not resolve conflicts; needs manual resolution."
@@ -205,7 +205,7 @@ jobs:
                     end')
                 case "$CONC" in
                   success)
-                    echo "All GitHub Actions checks passed (mergeable_state=$MERGEABLE_STATE)."
+                    echo "All GitHub Actions checks passed (mergeStateStatus=$MERGEABLE_STATE)."
                     return 0
                     ;;
                   failure)
@@ -213,11 +213,11 @@ jobs:
                     return 1
                     ;;
                   *)
-                    echo "CI still pending (poll $((i+1))/80, mergeable_state=$MERGEABLE_STATE)..."
+                    echo "CI still pending (poll $((i+1))/80, mergeStateStatus=$MERGEABLE_STATE)..."
                     ;;
                 esac
               else
-                echo "mergeable_state=$MERGEABLE_STATE (poll $((i+1))/80), waiting..."
+                echo "mergeStateStatus=$MERGEABLE_STATE (poll $((i+1))/80), waiting..."
               fi
 
               i=$((i+1))
