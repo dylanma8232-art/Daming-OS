@@ -290,8 +290,8 @@ jobs:
           # Jules 的 PR 不写 "Fixes #N"，按 Jules 在 Issue 里留下的 PR 链接找到对应 Issue 并关闭
           for ISSUE in $(gh api "repos/$REPO/issues?state=open&labels=jules&per_page=100" -q '.[] | select(.pull_request == null) | .number' 2>/dev/null); do
             if gh api "repos/$REPO/issues/$ISSUE/comments?per_page=100" -q '.[].body' 2>/dev/null | grep -Eq "/pull/${PR_NUMBER}([^0-9]|$)"; then
-              gh issue comment "$ISSUE" -R "$REPO" --body "已由 #${PR_NUMBER} 修复并合并，自动关闭。" || true
-              gh issue close "$ISSUE" -R "$REPO" --reason completed || true
+              gh api --method POST "repos/$REPO/issues/$ISSUE/comments" -f body="已由 #${PR_NUMBER} 修复并合并，自动关闭。" || true
+              gh api --method PATCH "repos/$REPO/issues/$ISSUE" -f state="closed" -f state_reason="completed" || true
             fi
           done
 
