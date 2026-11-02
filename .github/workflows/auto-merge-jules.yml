@@ -255,7 +255,7 @@ jobs:
           echo "Merging PR #$PR_NUMBER..."
           # --admin 兜底：即使将来误配了 required review / branch protection 也能合并；
           # squash 保留单 PR 单 commit 的线性历史。
-          if gh pr merge "$PR_NUMBER" -R "$REPO" --squash --delete-branch --admin; then
+          if gh pr merge "$PR_NUMBER" -R "$REPO" --squash --delete-branch --admin --match-head-commit "$SHA"; then
             echo "Merged."
             exit 0
           fi
@@ -266,7 +266,7 @@ jobs:
           sleep 15
           SHA=$(gh api "repos/$REPO/pulls/$PR_NUMBER" -q '.head.sha')
           wait_for_ci || exit $?
-          gh pr merge "$PR_NUMBER" -R "$REPO" --squash --delete-branch --admin
+          gh pr merge "$PR_NUMBER" -R "$REPO" --squash --delete-branch --admin --match-head-commit "$SHA"
 
       - name: Close linked issues
         if: steps.identify.outputs.is_jules == 'true'

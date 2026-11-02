@@ -43,6 +43,22 @@ def vector_search(query: str, query_vector: List[float], db_path: str, top_k: in
     return []
 
 
+def _upsert_local_fallback(item_id: str, content: str, vector: List[float], db_path: str,
+                          metadata: Optional[Dict[str, Any]]) -> bool:
+    """在 LanceDB 不可用或写入失败时，把向量写入本地 fallback-vectors.json。"""
+    try:
+        directory = Path(db_path); directory.mkdir(parents=True, exist_ok=True)
+        path = directory / "fallback-vectors.json"
+        rows = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+        rows = [row for row in rows if row.get("item_id") != item_id]
+        rows.append({"item_id": item_id, "text": content, "vector": vector, **(metadata or {})})
+        path.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+        return True
+    except (OSError, ValueError, TypeError) as fallback_exc:
+        logger.warning("Local vector fallback upsert failed: %s", fallback_exc)
+        return False
+
+
 def upsert_memory(item_id: str, content: str, vector: List[float], db_path: str,
                   metadata: Optional[Dict[str, Any]] = None) -> bool:
     """Persist a consolidated memory into the Warm vector layer.
@@ -76,27 +92,7 @@ def upsert_memory(item_id: str, content: str, vector: List[float], db_path: str,
         return True
     except ModuleNotFoundError:
         logger.debug("LanceDB is not installed; writing the local vector fallback")
-        try:
-            directory = Path(db_path); directory.mkdir(parents=True, exist_ok=True)
-            path = directory / "fallback-vectors.json"
-            rows = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
-            rows = [row for row in rows if row.get("item_id") != item_id]
-            rows.append({"item_id": item_id, "text": content, "vector": vector, **(metadata or {})})
-            path.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
-            return True
-        except (OSError, ValueError, TypeError) as fallback_exc:
-            logger.warning("Local vector fallback upsert failed: %s", fallback_exc)
-            return False
+        return _upsert_local_fallback(item_id, content, vector, db_path, metadata)
     except Exception as exc:
         logger.warning("LanceDB upsert failed: %s", exc)
-        try:
-            directory = Path(db_path); directory.mkdir(parents=True, exist_ok=True)
-            path = directory / "fallback-vectors.json"
-            rows = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
-            rows = [row for row in rows if row.get("item_id") != item_id]
-            rows.append({"item_id": item_id, "text": content, "vector": vector, **(metadata or {})})
-            path.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
-            return True
-        except (OSError, ValueError, TypeError) as fallback_exc:
-            logger.warning("Local vector fallback upsert failed: %s", fallback_exc)
-            return False
+        return _upsert_local_fallback(item_id, content, vector, db_path, metadata)

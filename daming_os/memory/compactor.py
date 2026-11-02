@@ -126,6 +126,9 @@ class MessageCompactor:
                     comp_content = self.compact_sync(content, remaining_tokens)
                     new_msg = dict(item["msg"])
                     new_msg["content"] = comp_content
+                    # 项 7：把压缩后的内容写回 item["msg"]，否则返回的仍是未压缩原文，
+                    # 而 tokens 却按压缩后计数，导致最终上下文超 max_tokens。
+                    item["msg"] = new_msg
                     # Update tokens
                     item["tokens"] = self.estimate_tokens(comp_content)
                     if accumulated_tokens + item["tokens"] <= max_tokens:
