@@ -1,0 +1,29 @@
+Metadata-Version: 2.4
+Name: daming-os
+Version: 1.5.0
+Summary: A decoupled, standalone Daming OS containing 大明记忆系统 3.0 and 大明成长系统 2.0
+Author: Wenchen Ma
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: Other/Proprietary License
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.9
+License-File: LICENSE
+Provides-Extra: vector
+Requires-Dist: lancedb>=0.6.0; extra == "vector"
+Provides-Extra: llm
+Requires-Dist: litellm>=1.0.0; extra == "llm"
+Provides-Extra: webhook
+Requires-Dist: requests>=2.0.0; extra == "webhook"
+Provides-Extra: tokens
+Requires-Dist: tiktoken>=0.5.0; extra == "tokens"
+Provides-Extra: full
+Requires-Dist: lancedb>=0.6.0; extra == "full"
+Requires-Dist: litellm>=1.0.0; extra == "full"
+Requires-Dist: requests>=2.0.0; extra == "full"
+Requires-Dist: tiktoken>=0.5.0; extra == "full"
+Dynamic: author
+Dynamic: classifier
+Dynamic: license-file
+Dynamic: provides-extra
+Dynamic: requires-python
+Dynamic: summary

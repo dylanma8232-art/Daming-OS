@@ -1,0 +1,2 @@
+[console_scripts]
+daming-os = daming_os.cli:main
