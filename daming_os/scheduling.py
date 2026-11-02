@@ -1,6 +1,6 @@
 """Portable scheduler contracts, heartbeat orchestration and configuration drift checks."""
 from __future__ import annotations
-import hashlib, json, os, threading, time
+import hashlib, json, os, tempfile, threading, time
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 from pathlib import Path
@@ -272,9 +272,27 @@ class DurableScheduler:
 
     def _write_state(self, state: Dict[str, Any]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = self.path.with_suffix(self.path.suffix + ".tmp")
-        temporary.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
-        os.replace(temporary, self.path)
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=self.path.parent,
+            prefix=self.path.name + ".",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary:
+            try:
+                temporary.write(json.dumps(state, ensure_ascii=False))
+                temporary.flush()
+                os.fsync(temporary.fileno())
+                temporary.close()
+                os.replace(temporary.name, self.path)
+            except Exception:
+                temporary.close()
+                try:
+                    os.unlink(temporary.name)
+                except OSError:
+                    pass
+                raise
 
 @dataclass
 class Heartbeat:
@@ -296,7 +314,25 @@ class ConfigGuard:
         digest=hashlib.sha256(json.dumps(config,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
         previous=self.path.read_text().strip() if self.path.exists() else ""
         if previous != digest:
-            temporary=self.path.with_suffix(self.path.suffix+".tmp")
-            temporary.write_text(digest+"\n")
-            os.replace(temporary,self.path)
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=self.path.parent,
+                prefix=self.path.name + ".",
+                suffix=".tmp",
+                delete=False,
+            ) as temporary:
+                try:
+                    temporary.write(digest + "\n")
+                    temporary.flush()
+                    os.fsync(temporary.fileno())
+                    temporary.close()
+                    os.replace(temporary.name, self.path)
+                except Exception:
+                    temporary.close()
+                    try:
+                        os.unlink(temporary.name)
+                    except OSError:
+                        pass
+                    raise
         return bool(previous) and previous != digest

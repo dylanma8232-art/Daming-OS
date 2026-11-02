@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -24,6 +25,7 @@ def test_same_size_edit_with_restored_mtime_is_detected_before_snapshot(tmp_path
     tracker.snapshot([str(source)])
     before = source.stat()
     assert tracker.changed([str(source)]) == []
+    time.sleep(0.01)
     source.write_text("other")
     os.utime(source, ns=(before.st_atime_ns, before.st_mtime_ns))
     snapshot = tracker.snapshot([str(source)])
