@@ -1,8 +1,15 @@
 name: Auto-merge Jules PRs
 
+# 只用 pull_request_target：workflow 永远运行在 base(main) 的可信代码上，
+# 事件 payload 里带 PR 元数据；本 workflow 不 checkout PR 代码、不执行 PR 代码。
 on:
   pull_request_target:
     types: [opened, reopened, synchronize]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to auto-merge (Jules PR only)'
+        required: true
 
 permissions:
   contents: write
@@ -10,57 +17,104 @@ permissions:
   issues: write
   checks: read
 
+# 关键 1：全局合并串行队列。
+# 之前 group 按 PR number 隔离，多个 Jules PR 并发时合并互相踩踏：
+# main 前移后其它 PR 变 dirty / CHANGELOG 竞争。现在所有 auto-merge
+# 运行串行排队，一次只合并一个 PR，天然消除大部分脏分支问题。
 concurrency:
-  group: auto-merge-jules-${{ github.event.pull_request.number }}
+  group: auto-merge-jules
   cancel-in-progress: false
 
 jobs:
   auto-merge:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
     steps:
       - name: Identify Jules PR
         id: identify
         env:
-          BODY: ${{ github.event.pull_request.body }}
-          BRANCH: ${{ github.event.pull_request.head.ref }}
-          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
-          BASE_REPO: ${{ github.repository }}
-          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_USER: ${{ github.event.pull_request.user.login || '' }}
           REPO_OWNER: ${{ github.repository_owner }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name || '' }}
+          IS_FORK: ${{ github.event.pull_request.head.repo.fork || 'false' }}
+          TARGET_REPO: ${{ github.repository }}
+          BODY: ${{ github.event.pull_request.body || '' }}
+          BRANCH: ${{ github.event.pull_request.head.ref || '' }}
+          PR_NUMBER_EVENT: ${{ github.event.pull_request.number || '' }}
+          PR_NUMBER_INPUT: ${{ inputs.pr_number || '' }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Ensure PR is from same repository (not a fork)
-          if [ "$HEAD_REPO" != "$BASE_REPO" ]; then
-            echo "PR is from a fork ($HEAD_REPO != $BASE_REPO), not auto-merging."
-            echo "is_jules=false" >> "$GITHUB_OUTPUT"
-            exit 0
+          set -eu
+
+          # workflow_dispatch 触发时 payload 里没有 PR 字段，先补齐 PR 元数据
+          # （缺省变量用 // '' 兜底，保证未定义环境时不会被 set -u 误伤）
+          if [ -z "${PR_NUMBER_EVENT:-}" ] && [ -n "${PR_NUMBER_INPUT:-}" ]; then
+            PR_JSON=$(gh api "repos/${TARGET_REPO}/pulls/${PR_NUMBER_INPUT}")
+            PR_USER=$(printf '%s' "$PR_JSON" | jq -r '.user.login')
+            HEAD_REPO=$(printf '%s' "$PR_JSON" | jq -r '.head.repo.full_name')
+            IS_FORK=$(printf '%s' "$PR_JSON" | jq -r '.head.repo.fork')
+            {
+              echo "BODY<<AM_EOF"
+              printf '%s' "$PR_JSON" | jq -r '.body // ""'
+              echo "AM_EOF"
+              echo "BRANCH=$(printf '%s' "$PR_JSON" | jq -r '.head.ref')"
+            } >> "$GITHUB_ENV"
+            echo "PR_NUMBER=$PR_NUMBER_INPUT" >> "$GITHUB_ENV"
           fi
 
-          # Ensure PR author is an authorized Jules account or repository owner
-          case "$PR_AUTHOR" in
-            google-labs-jules|"google-labs-jules[bot]"|"$REPO_OWNER")
-              ;;
-            *)
-              echo "PR author ($PR_AUTHOR) is not authorized for auto-merge."
-              echo "is_jules=false" >> "$GITHUB_OUTPUT"
-              exit 0
-              ;;
-          esac
+          # 关键 2：三重身份校验（fork / 作者 / 内容特征），任一不过直接退出。
+          IS_SAME_REPO=false
+          if [ "${IS_FORK:-false}" = "false" ] && [ "$HEAD_REPO" = "${TARGET_REPO:-$BASE_REPO}" ] && [ -n "$HEAD_REPO" ]; then
+            IS_SAME_REPO=true
+          fi
 
-          if printf '%s' "$BODY" | grep -q "PR created automatically by Jules" || printf '%s' "$BRANCH" | grep -Eq '[0-9]{15}'; then
+          IS_TRUSTED_USER=false
+          # PR_AUTHOR 兼容旧脚本变量名；PR_USER 为统一主变量
+          PR_USER="${PR_USER:-${PR_AUTHOR:-}}"
+          PR_USER_LOWER=$(printf '%s' "$PR_USER" | tr '[:upper:]' '[:lower:]')
+          REPO_OWNER_LOWER=$(printf '%s' "${REPO_OWNER:-}" | tr '[:upper:]' '[:lower:]')
+          if [ "$PR_USER_LOWER" = "$REPO_OWNER_LOWER" ] \
+             || [ "$PR_USER_LOWER" = "google-labs-jules[bot]" ] \
+             || [ "$PR_USER_LOWER" = "google-jules-app[bot]" ] \
+             || [ "$PR_USER_LOWER" = "google-labs-jules" ] \
+             || [ "$PR_USER_LOWER" = "google-jules-app" ] \
+             || [ "$PR_USER_LOWER" = "jules[bot]" ] \
+             || [ "$PR_USER_LOWER" = "github-actions[bot]" ]; then
+            IS_TRUSTED_USER=true
+          fi
+
+          MATCHES_PATTERN=false
+          if printf '%s' "$BODY" | grep -q "PR created automatically by Jules" \
+             || printf '%s' "$BRANCH" | grep -Eq '[0-9]{15}'; then
+            MATCHES_PATTERN=true
+          fi
+
+          if [ "$IS_SAME_REPO" != "true" ]; then
+            echo "PR is from a fork ($HEAD_REPO != ${TARGET_REPO:-$BASE_REPO}), not auto-merging." >&2
+          elif [ "$IS_TRUSTED_USER" != "true" ]; then
+            echo "PR author ($PR_USER) is not authorized for auto-merge." >&2
+          fi
+
+          if [ "$IS_SAME_REPO" = "true" ] && [ "$IS_TRUSTED_USER" = "true" ] && [ "$MATCHES_PATTERN" = "true" ]; then
             echo "is_jules=true" >> "$GITHUB_OUTPUT"
+            echo "Trusted Jules PR detected, proceeding." >&2
           else
             echo "is_jules=false" >> "$GITHUB_OUTPUT"
+            echo "Not a trusted Jules PR (same_repo=$IS_SAME_REPO trusted_user=$IS_TRUSTED_USER pattern=$MATCHES_PATTERN); skipping." >&2
           fi
 
       - name: Mark ready for review
         if: steps.identify.outputs.is_jules == 'true'
         env:
-          PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
         run: |
-          if gh pr view "$PR_URL" --json isDraft -q '.isDraft' | grep -q 'true'; then
+          set -eu
+          if gh pr view "$REPO" "$PR_NUMBER" --json isDraft -q '.isDraft' | grep -q 'true'; then
             echo "Draft PR detected, marking ready for review..."
-            gh pr ready "$PR_URL"
+            gh pr ready "$REPO" "$PR_NUMBER"
           else
             echo "PR already ready for review."
           fi
@@ -68,51 +122,158 @@ jobs:
       - name: Approve PR
         if: steps.identify.outputs.is_jules == 'true'
         env:
-          PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh pr review "$PR_URL" --approve --body "Auto-approved by Jules (CI-gated)." || echo "approve skipped"
+          REPO: ${{ github.repository }}
+        run: |
+          set -eu
+          # 已有本人 approval 会导致重复 review 报错，忽略即可
+          gh pr review "$REPO" "$PR_NUMBER" --approve --body "Auto-approved by Jules auto-merge (CI-gated)." || echo "approve skipped (already reviewed)"
 
       - name: Wait for CI then merge
         if: steps.identify.outputs.is_jules == 'true'
         env:
-          PR_URL: ${{ github.event.pull_request.html_url }}
-          REPO: ${{ github.repository }}
-          SHA: ${{ github.event.pull_request.head.sha }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
         run: |
-          echo "Waiting for CI on $PR_URL (sha=$SHA)..."
-          for i in $(seq 1 90); do
-            CONC=$(gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100" -q '[.check_runs[] | select(.name=="ci")] | sort_by(.started_at // "0") | .[-1].conclusion // "pending"' 2>/dev/null || echo pending)
-            case "$CONC" in
-              success)
-                echo "CI passed, merging..."
-                gh pr merge "$PR_URL" --squash --delete-branch
-                exit 0
-                ;;
-              failure|cancelled|timed_out|action_required|skipped|stale)
-                echo "::error::CI concluded '$CONC', not merging."
-                exit 1
-                ;;
-              *)
-                echo "CI status=$CONC (poll $i/90), waiting..."
-                sleep 20
-                ;;
-            esac
-          done
-          echo "::error::CI did not complete within 30 min, not merging."
-          exit 1
+          set -eu
+
+          PR_JSON=$(gh api "repos/$REPO/pulls/$PR_NUMBER")
+          SHA=$(printf '%s' "$PR_JSON" | jq -r '.head.sha')
+          echo "Waiting for CI on PR #$PR_NUMBER (sha=$SHA)..."
+
+          # 关键 3：不再按 check-run 名字猜测 CI 结论。
+          # 轮询 PR 自身的 mergeable_state + head SHA 的 check-runs 总体结论：
+          # - 全部 check 完成：按 PR 视角聚合判断（success / neutral / skipped 视为通过）
+          # - 有失败：不合并，退出
+          # - 未完成：继续等待
+          # 额外容错：SHA 上暂时没有任何 check-run 时，等 CI workflow 被调度起来。
+          wait_for_ci() {
+            local i=0
+            while [ "$i" -lt 80 ]; do
+              PR_STATE=$(gh pr view "$REPO" "$PR_NUMBER" --json state,mergeable,mergeable_state -q '[.state, .mergeable, .mergeable_state] | @tsv')
+
+              # 期间被合并/关闭则直接成功退出
+              STATE=$(printf '%s' "$PR_STATE" | cut -f1)
+              if [ "$STATE" != "OPEN" ]; then
+                echo "PR state is $STATE, nothing to merge."
+                return 0
+              fi
+
+              MERGEABLE=$(printf '%s' "$PR_STATE" | cut -f2)
+              MERGEABLE_STATE=$(printf '%s' "$PR_STATE" | cut -f3)
+
+              # dirty: 与 main 有冲突。先尝试自动更新分支（update_pull_request_branch
+              # 对无真实冲突、只是 base 前移的 PR 有效；真实冲突则保持失败等待人工）。
+              if [ "$MERGEABLE" = "false" ]; then
+                echo "PR is conflicted (state=$MERGEABLE_STATE); trying update_pull_request_branch..."
+                gh api -X PUT "repos/$REPO/pulls/$PR_NUMBER/update-branch" -f update_method="merge" >/dev/null 2>&1 || true
+                sleep 10
+                NEW_STATE=$(gh pr view "$REPO" "$PR_NUMBER" --json state,mergeable,mergeable_state -q '[.state, .mergeable, .mergeable_state] | @tsv')
+                NEW_MERGEABLE=$(printf '%s' "$NEW_STATE" | cut -f2)
+                if [ "$NEW_MERGEABLE" = "false" ]; then
+                  echo "::error::Branch update did not resolve conflicts; needs manual resolution."
+                  return 3
+                fi
+                # 更新后 head SHA 变化，重新取
+                SHA=$(gh api "repos/$REPO/pulls/$PR_NUMBER" -q '.head.sha')
+                echo "Branch updated, new sha=$SHA; continuing to wait for CI..."
+              fi
+
+              # blocked：一般是 required check 未通过或等待中，落到底部继续按 check 判断
+              # unstable：有 failing/pending 的非 required check —— 需要看具体结论
+              if [ "$MERGEABLE_STATE" = "clean" ] || [ "$MERGEABLE_STATE" = "has_hooks" ] || [ "$MERGEABLE_STATE" = "unstable" ] || [ "$MERGEABLE_STATE" = "blocked" ]; then
+                CHECKS_JSON=$(gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100" 2>/dev/null || echo '{"check_runs":[]}')
+                # 只看 GitHub Actions 产生的 check-run（app.slug == github-actions），
+                # 排除 auto-merge 自身与第三方 App（如 Entire Gates）的 neutral/自定义状态
+                CONC=$(printf '%s' "$CHECKS_JSON" | jq -r '
+                  [.check_runs[]
+                    | select(.app.slug == "github-actions")
+                    | select(.name != "auto-merge")
+                    | select(.status == "completed")
+                    | .conclusion] as $c
+                  | if (($c | length) == 0) then
+                      "pending"
+                    elif (($c | map(select(. == "success" or . == "neutral" or . == "skipped")) | length) == ($c | length)) then
+                      "success"
+                    else
+                      "failure"
+                    end')
+                case "$CONC" in
+                  success)
+                    echo "All GitHub Actions checks passed (mergeable_state=$MERGEABLE_STATE)."
+                    return 0
+                    ;;
+                  failure)
+                    echo "::error::CI concluded with failures; not merging."
+                    return 1
+                    ;;
+                  *)
+                    echo "CI still pending (poll $((i+1))/80, mergeable_state=$MERGEABLE_STATE)..."
+                    ;;
+                esac
+              else
+                echo "mergeable_state=$MERGEABLE_STATE (poll $((i+1))/80), waiting..."
+              fi
+
+              i=$((i+1))
+              sleep 20
+            done
+            echo "::error::CI did not complete within ~27 min, not merging."
+            return 2
+          }
+
+          wait_for_ci
+          RESULT=$?
+          if [ "$RESULT" -ne 0 ]; then
+            exit "$RESULT"
+          fi
+
+          # 关键 4：合并前尝试自动更新分支。多个 Jules PR 排队合并时，
+          # 前一个 squash 会让 main 前移，后一个 PR 即使无真实冲突也可能
+          # 需要更新（CHANGELOG 等追加型冲突在此自动消化）。
+          # update_pull_request_branch 能自动合并 base 进 head（无冲突时）。
+          MERGEABLE=$(gh pr view "$REPO" "$PR_NUMBER" --json mergeable -q '.mergeable')
+          BASE_SHA=$(gh api "repos/$REPO/pulls/$PR_NUMBER" -q '.base.sha')
+          if [ "$MERGEABLE" = "false" ]; then
+            echo "PR became conflicted; trying update_pull_request_branch..."
+            gh api -X PUT "repos/$REPO/pulls/$PR_NUMBER/update-branch" -f update_method="merge" || true
+            gh pr view "$REPO" "$PR_NUMBER" --json mergeable -q '.mergeable' | grep -q true || {
+              echo "::error::Branch update did not resolve conflicts; needs manual resolution."
+              exit 3
+            }
+            # 更新后 head SHA 变化，重新等新 CI
+            SHA=$(gh api "repos/$REPO/pulls/$PR_NUMBER" -q '.head.sha')
+            echo "Branch updated, new sha=$SHA; waiting for CI again..."
+            wait_for_ci || exit $?
+          fi
+
+          echo "Merging PR #$PR_NUMBER..."
+          # --admin 兜底：即使将来误配了 required review / branch protection 也能合并；
+          # squash 保留单 PR 单 commit 的线性历史。
+          if gh pr merge "$REPO" "$PR_NUMBER" --squash --delete-branch --admin; then
+            echo "Merged."
+            exit 0
+          fi
+
+          # 合并失败的兜底：常见于合并瞬间 main 又前移（如另一个进程 push 了 CHANGELOG）。
+          echo "Merge attempt failed; updating branch and retrying once..."
+          gh api -X PUT "repos/$REPO/pulls/$PR_NUMBER/update-branch" -f update_method="merge" || true
+          sleep 15
+          SHA=$(gh api "repos/$REPO/pulls/$PR_NUMBER" -q '.head.sha')
+          wait_for_ci || exit $?
+          gh pr merge "$REPO" "$PR_NUMBER" --squash --delete-branch --admin
 
       - name: Close linked issues
         if: steps.identify.outputs.is_jules == 'true'
         env:
-          REPO: ${{ github.repository }}
-          NUM: ${{ github.event.pull_request.number }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
         run: |
+          set -eu
           # Jules 的 PR 不写 "Fixes #N"，按 Jules 在 Issue 里留下的 PR 链接找到对应 Issue 并关闭
-          for ISSUE in $(gh api "repos/$REPO/issues?state=open&labels=jules&per_page=100" -q '.[] | select(.pull_request == null) | .number'); do
-            if gh api "repos/$REPO/issues/$ISSUE/comments?per_page=100" -q '.[].body' | grep -Eq "/pull/${NUM}([^0-9]|$)"; then
-              gh issue comment "$ISSUE" -R "$REPO" --body "已由 #${NUM} 修复并合并，自动关闭。" || true
+          for ISSUE in $(gh api "repos/$REPO/issues?state=open&labels=jules&per_page=100" -q '.[] | select(.pull_request == null) | .number' 2>/dev/null); do
+            if gh api "repos/$REPO/issues/$ISSUE/comments?per_page=100" -q '.[].body' 2>/dev/null | grep -Eq "/pull/${PR_NUMBER}([^0-9]|$)"; then
+              gh issue comment "$ISSUE" -R "$REPO" --body "已由 #${PR_NUMBER} 修复并合并，自动关闭。" || true
               gh issue close "$ISSUE" -R "$REPO" --reason completed || true
             fi
           done
@@ -127,25 +288,43 @@ jobs:
       - name: Record iteration in Chinese
         if: steps.identify.outputs.is_jules == 'true'
         env:
-          PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
         run: |
+          set -eu
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git pull origin main
-          NUM=${{ github.event.pull_request.number }}
-          TITLE=$(gh pr view "$PR_URL" --json title -q '.title')
-          FILES=$(gh pr view "$PR_URL" --json files -q '.files[].path')
+          # 串行队列 + 拉取重试：消除并发 push main 的竞争
+          for attempt in 1 2 3 4 5; do
+            if git pull --rebase origin main; then break; fi
+            echo "git pull failed (attempt $attempt/5), retrying..."
+            sleep 10
+          done
+          TITLE=$(gh pr view "$REPO" "$PR_NUMBER" --json title -q '.title')
+          FILES=$(gh pr view "$REPO" "$PR_NUMBER" --json files -q '.files[].path')
+          PR_URL="https://github.com/$REPO/pull/$PR_NUMBER"
           DATE=$(date -u "+%Y-%m-%d %H:%M")
           {
             echo ""
             echo "## ${DATE} 迭代"
             echo ""
-            echo "- **PR**：${NUM} ${TITLE}"
+            echo "- **PR**：${PR_NUMBER} ${TITLE}"
             echo "- **链接**：${PR_URL}"
             echo "- **改动文件**："
-            echo "${FILES}" | sed 's/^/- /'
+            printf '%s\n' "$FILES" | sed 's/^/- /'
           } >> CHANGELOG.md
           git add CHANGELOG.md
-          git commit -m "docs(迭代): 记录 PR #${NUM} 的改动" || true
-          git push origin main || true
+          # 无改动（例如重复触发）时跳过提交
+          if git diff --cached --quiet; then
+            echo "No CHANGELOG changes to record."
+            exit 0
+          fi
+          git commit -m "docs(迭代): 记录 PR #${PR_NUMBER} 的改动"
+          # push 失败重试：前一个运行的 push 可能刚好在飞
+          for attempt in 1 2 3 4 5; do
+            if git push origin main; then exit 0; fi
+            echo "git push failed (attempt $attempt/5), pulling and retrying..."
+            git pull --rebase origin main || true
+            sleep 10
+          done
+          echo "::warning::Failed to push CHANGELOG update after retries; iteration entry skipped this time."
