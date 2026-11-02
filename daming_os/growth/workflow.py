@@ -49,6 +49,8 @@ class EvolutionWorkflow:
         if state == "validated":
             if not self.approvals.is_approved(proposal):
                 return "awaiting_approval"
+            if hasattr(self.validator, "validate_execution"):
+                self.validator.validate_execution(proposal)
             self.proposals.transition(proposal_id, "approved")
             return "approved"
         if state == "approved":
