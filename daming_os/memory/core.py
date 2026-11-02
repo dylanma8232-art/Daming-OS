@@ -74,13 +74,17 @@ class SpreadingActivationTraverser:
                 target = edge.get("target_node")
                 weight = edge.get("weight", 0.5)
                 
-                if target:
-                    new_activation = activation * weight * beta - gamma
-                    if new_activation > 0:
-                        results[target] = results.get(target, 0.0) + new_activation
-                        if target not in visited:
-                            visited.add(target)
-                            queue.append((target, new_activation, depth + 1))
+                if not target:
+                    continue
+
+                new_activation = activation * weight * beta - gamma
+                if new_activation <= 0:
+                    continue
+
+                results[target] = results.get(target, 0.0) + new_activation
+                if target not in visited:
+                    visited.add(target)
+                    queue.append((target, new_activation, depth + 1))
         
         return sorted([{"id": k, "score": v, "source": "graph"} for k, v in results.items() if k not in seed_ids], key=lambda x: -x["score"])
 
