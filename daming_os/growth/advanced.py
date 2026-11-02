@@ -8,9 +8,12 @@ and approval chain as ordinary growth events.
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import os
 import re
+import socket
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,6 +25,33 @@ from .learning import ExperienceStore, SkillDistiller
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def is_safe_url(url: str) -> bool:
+    try:
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return False
+
+        hostname = parsed.hostname
+        if not hostname:
+            return False
+
+        if hostname.lower() in ("localhost", "localhost.localdomain"):
+            return False
+
+        try:
+            ip_str = socket.gethostbyname(hostname)
+        except socket.gaierror:
+            return False
+
+        ip = ipaddress.ip_address(ip_str)
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_unspecified:
+            return False
+
+        return True
+    except Exception:
+        return False
 
 
 class CouncilRole(Protocol):
@@ -62,6 +92,9 @@ class LLMCouncilRole:
         )
         try:
             url = f"{self.base_url}/chat/completions"
+            if not is_safe_url(url):
+                return self.fallback.review(proposal, role)
+
             payload = {
                 "model": self.model,
                 "messages": [{"role": "user", "content": prompt}],
