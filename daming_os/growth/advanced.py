@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import re
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -62,6 +63,11 @@ class LLMCouncilRole:
         )
         try:
             url = f"{self.base_url}/chat/completions"
+
+            parsed_url = urllib.parse.urlparse(url)
+            if parsed_url.scheme not in ("http", "https"):
+                raise ValueError(f"Invalid URL scheme: {parsed_url.scheme}")
+
             payload = {
                 "model": self.model,
                 "messages": [{"role": "user", "content": prompt}],
