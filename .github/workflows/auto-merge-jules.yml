@@ -155,7 +155,7 @@ jobs:
           wait_for_ci() {
             local i=0
             while [ "$i" -lt 80 ]; do
-              PR_STATE=$(gh pr view "$PR_NUMBER" -R "$REPO" --json state,mergeable,mergeable_state -q '[.state, .mergeable, .mergeable_state] | @tsv')
+              PR_STATE=$(gh pr view "$PR_NUMBER" -R "$REPO" --json state,mergeable -q '[.state, .mergeable] | @tsv')
 
               # 期间被合并/关闭则直接成功退出
               STATE=$(printf '%s' "$PR_STATE" | cut -f1)
@@ -165,7 +165,7 @@ jobs:
               fi
 
               MERGEABLE=$(printf '%s' "$PR_STATE" | cut -f2)
-              MERGEABLE_STATE=$(printf '%s' "$PR_STATE" | cut -f3)
+              MERGEABLE_STATE=""
 
               # dirty: 与 main 有冲突。先尝试自动更新分支（update_pull_request_branch
               # 对无真实冲突、只是 base 前移的 PR 有效；真实冲突则保持失败等待人工）。
@@ -173,7 +173,7 @@ jobs:
                 echo "PR is conflicted (state=$MERGEABLE_STATE); trying update_pull_request_branch..."
                 gh api -X PUT "repos/$REPO/pulls/$PR_NUMBER/update-branch" -f update_method="merge" >/dev/null 2>&1 || true
                 sleep 10
-                NEW_STATE=$(gh pr view "$PR_NUMBER" -R "$REPO" --json state,mergeable,mergeable_state -q '[.state, .mergeable, .mergeable_state] | @tsv')
+                NEW_STATE=$(gh pr view "$PR_NUMBER" -R "$REPO" --json state,mergeable -q '[.state, .mergeable] | @tsv')
                 NEW_MERGEABLE=$(printf '%s' "$NEW_STATE" | cut -f2)
                 if [ "$NEW_MERGEABLE" = "false" ]; then
                   echo "::error::Branch update did not resolve conflicts; needs manual resolution."
@@ -186,7 +186,7 @@ jobs:
 
               # blocked：一般是 required check 未通过或等待中，落到底部继续按 check 判断
               # unstable：有 failing/pending 的非 required check —— 需要看具体结论
-              if [ "$MERGEABLE_STATE" = "clean" ] || [ "$MERGEABLE_STATE" = "has_hooks" ] || [ "$MERGEABLE_STATE" = "unstable" ] || [ "$MERGEABLE_STATE" = "blocked" ]; then
+              if true; then
                 CHECKS_JSON=$(gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100" 2>/dev/null || echo '{"check_runs":[]}')
                 # 只看 GitHub Actions 产生的 check-run（app.slug == github-actions），
                 # 排除 auto-merge 自身与第三方 App（如 Entire Gates）的 neutral/自定义状态
