@@ -52,14 +52,19 @@ jobs:
           # （缺省变量用 // '' 兜底，保证未定义环境时不会被 set -u 误伤）
           if [ -z "${PR_NUMBER_EVENT:-}" ] && [ -n "${PR_NUMBER_INPUT:-}" ]; then
             PR_JSON=$(gh api "repos/${TARGET_REPO}/pulls/${PR_NUMBER_INPUT}")
+            # dispatch 时事件注入的 BODY/BRANCH env 为空，校验在本 step 内
+            # 就要用，必须同时覆盖本 step 的 shell 变量（GITHUB_ENV 只对后续
+            # step 生效）
             PR_USER=$(printf '%s' "$PR_JSON" | jq -r '.user.login')
             HEAD_REPO=$(printf '%s' "$PR_JSON" | jq -r '.head.repo.full_name')
             IS_FORK=$(printf '%s' "$PR_JSON" | jq -r '.head.repo.fork')
+            BODY=$(printf '%s' "$PR_JSON" | jq -r '.body // ""')
+            BRANCH=$(printf '%s' "$PR_JSON" | jq -r '.head.ref')
             {
               echo "BODY<<AM_EOF"
-              printf '%s' "$PR_JSON" | jq -r '.body // ""'
+              printf '%s' "$BODY"
               echo "AM_EOF"
-              echo "BRANCH=$(printf '%s' "$PR_JSON" | jq -r '.head.ref')"
+              echo "BRANCH=$BRANCH"
             } >> "$GITHUB_ENV"
             echo "PR_NUMBER=$PR_NUMBER_INPUT" >> "$GITHUB_ENV"
           fi
