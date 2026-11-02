@@ -135,22 +135,7 @@ class MemorySystem:
     def close(self) -> None:
         bus.unsubscribe(EvolutionCompletedEvent, self._on_evolution_completed)
 
-    def query(self, text: str, options: Optional[QueryOptions] = None, *,
-              context: Optional[QueryContext] = None) -> List[Dict[str, Any]]:
-        """
-        Primary interface for agent retrieval.
-        Attempts L1/L2 cache first, then performs 3-Way RRF fallback.
-        """
-        if options is not None and context is not None:
-            raise ValueError("Pass either options or context, not both")
-        options = options if options is not None else context
-        options = options if options is not None else QueryOptions()
-        query_vector = options.query_vector
-        top_k = options.top_k
-        max_chars = options.max_chars
-        messages = options.messages
-        scope = options.scope
-
+    def _build_recall_query(self, text: str, messages: Optional[List[Dict[str, Any]]], scope: Optional[MemoryScope]) -> str:
         # 针对多轮会话追问进行前置上下文拼接，消除指代失忆
         recall_query = text
         if messages and isinstance(messages, list):
@@ -172,24 +157,9 @@ class MemorySystem:
         if scope:
             scope_key = "|".join((scope.tenant_id or "", scope.agent_id or "", scope.session_id or ""))
             recall_query = f"scope:{scope_key}\n{recall_query}"
+        return recall_query
 
-        # L2 needs an embedding *before* cache lookup.  The old order made the
-        # semantic cache unreachable for the default adapter path.
-        if query_vector is None and self.embedding_provider is not None:
-            try:
-                query_vector = self.embedding_provider.embed(recall_query)
-            except Exception as exc:
-                logger.warning("Embedding generation failed; using sparse retrieval: %s", exc)
-
-        cached_result = self.cache.get(recall_query, query_vector)
-        if cached_result is not None:
-            logger.debug("L1/L2 cache hit for query.")
-            revalidated = self._revalidate_cached_results(cached_result, scope)
-            if revalidated:
-                return revalidated[:top_k]
-
-        logger.debug("Cache miss. Performing 3-Way RRF retrieval.")
-        
+    def _perform_3way_rrf(self, recall_query: str, query_vector: Optional[List[float]]) -> List[Dict[str, Any]]:
         # 1. Warm Layer (LanceDB Dense Vector Search)
         warm_results = (vector_search(recall_query, query_vector, db_path=self.vector_path, top_k=20)
                         if query_vector is not None else [])
@@ -212,8 +182,9 @@ class MemorySystem:
         graph_results = self.traverser.traverse(seed_ids, db_path=self.sqlite_path)
         
         # Combine via 3-Way RRF
-        fused = rrf_fusion([warm_results, graph_results, cold_results], k=10)
-        
+        return rrf_fusion([warm_results, graph_results, cold_results], k=10)
+
+    def _hydrate_results(self, fused: List[Dict[str, Any]], max_chars: int) -> None:
         # Hydrate with markdown content
         fused_ids = [res["id"] for res in fused]
         contents_dict = get_markdown_contents(fused_ids, self.sqlite_manager)
@@ -225,6 +196,45 @@ class MemorySystem:
                     res["content"] = content[:max_chars] + "\n\n... [Content Truncated due to length limit]"
                 else:
                     res["content"] = content
+
+    def query(self, text: str, options: Optional[QueryOptions] = None, *,
+              context: Optional[QueryContext] = None) -> List[Dict[str, Any]]:
+        """
+        Primary interface for agent retrieval.
+        Attempts L1/L2 cache first, then performs 3-Way RRF fallback.
+        """
+        if options is not None and context is not None:
+            raise ValueError("Pass either options or context, not both")
+        options = options if options is not None else context
+        options = options if options is not None else QueryOptions()
+        query_vector = options.query_vector
+        top_k = options.top_k
+        max_chars = options.max_chars
+        messages = options.messages
+        scope = options.scope
+
+        recall_query = self._build_recall_query(text, messages, scope)
+
+        # L2 needs an embedding *before* cache lookup.  The old order made the
+        # semantic cache unreachable for the default adapter path.
+        if query_vector is None and self.embedding_provider is not None:
+            try:
+                query_vector = self.embedding_provider.embed(recall_query)
+            except Exception as exc:
+                logger.warning("Embedding generation failed; using sparse retrieval: %s", exc)
+
+        cached_result = self.cache.get(recall_query, query_vector)
+        if cached_result is not None:
+            logger.debug("L1/L2 cache hit for query.")
+            revalidated = self._revalidate_cached_results(cached_result, scope)
+            if revalidated:
+                return revalidated[:top_k]
+
+        logger.debug("Cache miss. Performing 3-Way RRF retrieval.")
+
+        fused = self._perform_3way_rrf(recall_query, query_vector)
+
+        self._hydrate_results(fused, max_chars)
                 
         # Apply safety/Q-value ranking & Message Compactor math
         final_results = self._apply_safety_and_qvalue(fused, scope)[:10]
