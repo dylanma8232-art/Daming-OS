@@ -1,6 +1,6 @@
 """Portable scheduler contracts, heartbeat orchestration and configuration drift checks."""
 from __future__ import annotations
-import hashlib, json, os, threading, time
+import hashlib, json, os, tempfile, threading, time
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 from pathlib import Path
@@ -272,9 +272,14 @@ class DurableScheduler:
 
     def _write_state(self, state: Dict[str, Any]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = self.path.with_suffix(self.path.suffix + ".tmp")
-        temporary.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
-        os.replace(temporary, self.path)
+        fd, temp_path = tempfile.mkstemp(dir=self.path.parent, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(state, f, ensure_ascii=False)
+            os.replace(temp_path, self.path)
+        except Exception:
+            os.unlink(temp_path)
+            raise
 
 @dataclass
 class Heartbeat:
