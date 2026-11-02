@@ -6,8 +6,6 @@ from contextlib import closing
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
-_local = threading.local()
-
 from ..config import config
 
 _local = threading.local()
@@ -45,6 +43,28 @@ class HardenedSQLiteManager:
         conn.row_factory = sqlite3.Row
         return conn
 
+    def _get_link_weight(self, link_type: str) -> float:
+        if link_type == "depends_on":
+            return 1.0
+        if link_type == "causes":
+            return 0.9
+        if link_type == "extends":
+            return 0.8
+        return 0.5
+
+    def _build_adjacency_list(self, cursor: sqlite3.Cursor) -> Dict[str, List[Dict[str, Any]]]:
+        adj_list = {}
+        cursor.execute("SELECT source_node, target_node, link_type FROM wiki_edges")
+        for row in cursor.fetchall():
+            src = row['source_node']
+            target = row['target_node']
+            weight = self._get_link_weight(row['link_type'])
+
+            if src not in adj_list:
+                adj_list[src] = []
+            adj_list[src].append({"target_node": target, "weight": weight})
+        return adj_list
+
     def get_adjacency_list(self) -> Dict[str, List[Dict[str, Any]]]:
         """从 SQLite wiki_edges 加载邻接表，并根据 link_type 进行多维语义扩散加权"""
         adj_list = {}
@@ -56,25 +76,7 @@ class HardenedSQLiteManager:
                     return adj_list
 
                 # 3.0 DDL 列名变更为 source_node, target_node, 包含 link_type 分类
-                cursor.execute("SELECT source_node, target_node, link_type FROM wiki_edges")
-                for row in cursor.fetchall():
-                    src = row['source_node']
-                    target = row['target_node']
-                    link_type = row['link_type']
-                    
-                    # 根据语义分类 link_type 赋予动态扩散能量权重
-                    if link_type == "depends_on":
-                        weight = 1.0
-                    elif link_type == "causes":
-                        weight = 0.9
-                    elif link_type == "extends":
-                        weight = 0.8
-                    else:
-                        weight = 0.5
-                        
-                    if src not in adj_list:
-                        adj_list[src] = []
-                    adj_list[src].append({"target_node": target, "weight": weight})
+                adj_list = self._build_adjacency_list(cursor)
         except Exception as e:
             logger.warning(f"Failed to get adjacency list: {e}")
         return adj_list
@@ -127,6 +129,26 @@ class HardenedSQLiteManager:
             logger.warning(f"Failed to get item meta for {item_id}: {e}")
         return None
 
+    def _fetch_items_meta_chunk(self, cursor: sqlite3.Cursor, chunk: List[str], result: Dict[str, Dict[str, Any]]) -> None:
+        placeholders = ",".join(["?"] * len(chunk))
+        cursor.execute(
+            f"SELECT item_id, importance, category, metadata_json FROM items WHERE item_id IN ({placeholders})",
+            chunk
+        )
+
+        for row in cursor.fetchall():
+            metadata = {}
+            if "metadata_json" in row.keys() and row["metadata_json"]:
+                try:
+                    metadata = json.loads(row["metadata_json"])
+                except Exception as parse_e:
+                    logger.warning(f"Failed to parse metadata_json for {row['item_id']}: {parse_e}")
+            result[row["item_id"]] = {
+                "importance": row["importance"],
+                "category": row["category"],
+                "metadata": metadata
+            }
+
     def get_items_meta(self, item_ids: List[str]) -> Dict[str, Dict[str, Any]]:
         """批量获取节点的元数据"""
         if not item_ids:
@@ -144,25 +166,7 @@ class HardenedSQLiteManager:
                 chunk_size = 999
                 for i in range(0, len(item_ids), chunk_size):
                     chunk = item_ids[i:i + chunk_size]
-                    placeholders = ",".join(["?"] * len(chunk))
-
-                    cursor.execute(
-                        f"SELECT item_id, importance, category, metadata_json FROM items WHERE item_id IN ({placeholders})",
-                        chunk
-                    )
-
-                    for row in cursor.fetchall():
-                        metadata = {}
-                        if "metadata_json" in row.keys() and row["metadata_json"]:
-                            try:
-                                metadata = json.loads(row["metadata_json"])
-                            except Exception as parse_e:
-                                logger.warning(f"Failed to parse metadata_json for {row['item_id']}: {parse_e}")
-                        result[row["item_id"]] = {
-                            "importance": row["importance"],
-                            "category": row["category"],
-                            "metadata": metadata
-                        }
+                    self._fetch_items_meta_chunk(cursor, chunk, result)
                 return result
         except Exception as e:
             logger.warning(f"Failed to get items meta: {e}")
