@@ -6,13 +6,40 @@ chat platform.
 """
 from __future__ import annotations
 
-import fcntl
+import os
 import json
 import re
 import time
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional
+
+
+def _flock(fileobj, exclusive: bool) -> None:
+    """跨平台建议锁：POSIX 用 fcntl，Windows 用 msvcrt；失败时降级为无锁（尽力而为）。"""
+    try:
+        if os.name == "nt":
+            import msvcrt
+            fileobj.seek(0)
+            msvcrt.locking(fileobj.fileno(), msvcrt.LK_LOCK if exclusive else msvcrt.LK_RLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fileobj.fileno(), fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
+    except (ImportError, OSError):
+        pass
+
+
+def _funlock(fileobj) -> None:
+    try:
+        if os.name == "nt":
+            import msvcrt
+            fileobj.seek(0)
+            msvcrt.locking(fileobj.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fileobj.fileno(), fcntl.LOCK_UN)
+    except (ImportError, OSError):
+        pass
 
 
 def estimate_tokens(text: str) -> int:
@@ -47,12 +74,12 @@ class HotMemoryJournal:
         )
         path = self._path(session_id)
         with path.open("a", encoding="utf-8") as handle:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            _flock(handle, exclusive=True)
             try:
                 handle.write(json.dumps(asdict(record), ensure_ascii=False) + "\n")
                 handle.flush()
             finally:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                _funlock(handle)
         return record
 
     def read(self, session_id: str, limit: Optional[int] = None) -> List[TurnRecord]:
@@ -61,7 +88,7 @@ class HotMemoryJournal:
             return []
         records = []
         with path.open(encoding="utf-8") as handle:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_SH)
+            _flock(handle, exclusive=False)
             try:
                 for line in handle:
                     try:
@@ -70,7 +97,7 @@ class HotMemoryJournal:
                     except (TypeError, ValueError, json.JSONDecodeError):
                         continue
             finally:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                _funlock(handle)
         return records[-limit:] if limit else records
 
     def context_window(self, session_id: str, max_tokens: int = 2_000, keep_turns: int = 10,

@@ -17,8 +17,8 @@ class MemoryConsolidator:
     Handles deep sleep background tasks for the 大明记忆系统.
     Consolidates hot memory to warm (LanceDB/SQLite) and cold (Obsidian Markdown) layers.
     """
-    def __init__(self, embedding_provider: Optional[EmbeddingProvider] = None):
-        root = Path(config.WORKSPACE_ROOT)
+    def __init__(self, embedding_provider: Optional[EmbeddingProvider] = None, root: Optional[str] = None):
+        root = Path(root) if root else Path(config.WORKSPACE_ROOT)
         self.root = root
         self.wiki_dir = root / config.WIKI_DIR
         path = Path(config.SQLITE_META_PATH)
@@ -84,17 +84,24 @@ class MemoryConsolidator:
                     # Vector promotion is intentionally outside the insert
                     # branch: a memory created while embeddings were offline
                     # must become searchable when a later run has a provider.
+                    # 项 4：仅在向量提升成功后才删除队列项，否则保留以便下一轮重试。
+                    vector_promoted = True
                     if self.embedding_provider is not None:
                         try:
                             vector = self.embedding_provider.embed(content)
                             memory_db = Path(config.MEMORY_DB_PATH)
                             vector_db = memory_db if memory_db.is_absolute() else self.root / memory_db
-                            upsert_memory(item_id, content, vector, str(vector_db), metadata)
+                            if not upsert_memory(item_id, content, vector, str(vector_db), metadata):
+                                vector_promoted = False
                         except Exception as exc:
                             # SQLite/FTS remains durable when an embedding service is
                             # unavailable; the next maintenance run can retry it.
+                            vector_promoted = False
                             logger.warning("Warm vector promotion failed for %s: %s", item_id, exc)
-                    conn.execute("DELETE FROM incoming_memories WHERE id=?", (row_id,))
+                    if vector_promoted:
+                        conn.execute("DELETE FROM incoming_memories WHERE id=?", (row_id,))
+                    else:
+                        logger.warning("Retaining queue item %s for vector promotion retry", row_id)
                 except (ValueError, TypeError) as exc:
                     logger.warning("Skipping invalid memory queue item %s: %s", row_id, exc)
             conn.commit()

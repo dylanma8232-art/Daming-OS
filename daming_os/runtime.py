@@ -55,7 +55,7 @@ class DamingRuntime:
                  watchdog_enabled: Optional[bool] = None, reviews_enabled: Optional[bool] = None,
                  daily_digest_enabled: Optional[bool] = None,
                  start_scheduler: bool = False):
-        self.workspace = Path(workspace)
+        self.workspace = Path(workspace).resolve()
         self.workspace.mkdir(parents=True, exist_ok=True)
         self._closed = False
         runtime_config = self._runtime_config()
@@ -79,8 +79,9 @@ class DamingRuntime:
         self.memory_migration.initialize()
         self.proposals = ProposalStore()
         self.adapter = adapter or DamingAdapter(proposal_store=self.proposals)
-        self.maintenance = MemoryMaintenance(str(self.workspace))
-        self.deep_sleep = DeepSleepMaintenance(str(self.workspace), str(self.workspace / "memory" / "memory_meta.db"))
+        embedding_provider = getattr(getattr(self.adapter, "memory", None), "embedding_provider", None)
+        self.maintenance = MemoryMaintenance(str(self.workspace), embedding_provider=embedding_provider)
+        self.deep_sleep = DeepSleepMaintenance(str(self.workspace), str(self.workspace / "memory" / "memory_meta.db"), embedding_provider=embedding_provider)
         self.session_cleaner = SessionCleaner(str(self.workspace / "memory" / "hot"))
         self.session_watchdog = SessionWatchdog(str(self.workspace / "memory" / "sessions"))
         self.memory_health = MemoryHealthcheck(str(self.workspace))

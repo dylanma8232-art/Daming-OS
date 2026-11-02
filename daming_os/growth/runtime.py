@@ -100,11 +100,11 @@ class GrowthCoordinator:
                 payload = proposal["payload"]
                 if not payload.get("target_file"):
                     evidence = payload.get("source_events", [])
-                    lesson = "\\n".join(str(item.get("content", "")) for item in evidence[-5:]) or "Review recurring growth evidence."
+                    lesson = "\n".join(str(item.get("content", "")) for item in evidence[-5:]) or "Review recurring growth evidence."
                     payload.update({
                         "artifact_type": "skill",
                         "target_file": f"skills/auto-generated/evolution-{identifier}/SKILL.md",
-                        "proposed_code": f"# Evolution practice {identifier}\\n\\n{lesson}\\n",
+                        "proposed_code": f"# Evolution practice {identifier}\n\n{lesson}\n",
                     })
                     self.proposals.update_payload(identifier, payload)
                     proposal = self.proposals.get(identifier)

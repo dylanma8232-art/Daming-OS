@@ -232,6 +232,9 @@ def install_host(host_dir: str, state_dir: str = ".daming", integration: str = "
     if state_value.is_absolute() or ".." in state_value.parts:
         raise ValueError("--state-dir must be a safe path inside the host project")
     state = (host / state_value).resolve()
+    # 项 11：拒绝把宿主项目根目录当作状态目录，避免覆写宿主自有 .gitignore。
+    if state == host:
+        raise ValueError("--state-dir must not be the host project root; choose a subdirectory like .daming")
     initialized = init_workspace(str(state), integration)
     runtime_config = _load_config(state).get("runtime", {})
     agent_id = str(runtime_config.get("agent_id", _stable_agent_id(state)))

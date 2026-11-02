@@ -42,6 +42,18 @@ class TestMemoryCompaction(unittest.TestCase):
         self.assertLess(len(compacted), len(messages))
         self.assertGreater(len(compacted), 0)
 
+    def test_compact_list_writes_back_compressed_content(self):
+        # 项 7/13：单项压缩后必须把压缩内容写回 msg，且总 token 数受控在 max_tokens 内。
+        from unittest.mock import patch
+        compactor = MessageCompactor()
+        with patch.object(compactor.llm_provider, "complete", return_value="compressed text"):
+            messages = [{"content": "A" * 200, "id": "1", "final_score": 1.0}]
+            compacted = compactor.compact_sync(messages, max_tokens=20)
+        self.assertEqual(len(compacted), 1)
+        self.assertEqual(compacted[0]["content"], "compressed text")
+        total = sum(compactor.estimate_tokens(m["content"]) for m in compacted)
+        self.assertLessEqual(total, 20)
+
     def test_compact_str_llm_exception_fallback(self):
         text = "This is a long string that definitely needs to be truncated because it exceeds the maximum token limit set."
         max_tokens = 5
@@ -61,12 +73,27 @@ class TestMemoryCompaction(unittest.TestCase):
         self.assertTrue(self.compactor.llm_provider.complete.called)
 
     def test_middleware_regex_clean(self):
-        agent_input = "User input here.\n<MemoryHint>\n[vector ID:123] Old memory context here...\n</MemoryHint>\nAnother query part."
-        cleaned = re.sub(r"<MemoryHint>.*?</MemoryHint>", "", agent_input, flags=re.DOTALL).strip()
-        self.assertNotIn("MemoryHint", cleaned)
-        self.assertNotIn("Old memory context", cleaned)
-        self.assertIn("User input here.", cleaned)
-        self.assertIn("Another query part.", cleaned)
+        # 项 19：直接调用 attach_memory 验证真实中间件行为，而非复制正则自测。
+        from unittest.mock import patch
+        mock_memory = MagicMock()
+        mock_memory.query.return_value = []
+        with patch("daming_os.middleware._global_memory", mock_memory):
+            @attach_memory()
+            def handler(agent_input: str, **kwargs) -> str:
+                return "result"
+
+            agent_input = (
+                "User input here.\n<MemoryHint>\n"
+                "[vector ID:123] Old memory context here...\n</MemoryHint>\nAnother query part."
+            )
+            handler(agent_input)
+
+        mock_memory.store.assert_called_once()
+        stored = mock_memory.store.call_args[0][0]
+        self.assertNotIn("MemoryHint", stored)
+        self.assertNotIn("Old memory context", stored)
+        self.assertIn("User input here.", stored)
+        self.assertIn("Another query part.", stored)
 
 if __name__ == "__main__":
     unittest.main()

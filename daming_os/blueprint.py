@@ -29,7 +29,7 @@ CAPABILITIES: tuple[Capability, ...] = (
     Capability("skill_lifecycle", ("skills_lazy_loader.py", "skill-usage-tracker.py", "skill-patch-tracker.py", "learning-to-skill.py", "apply_experience.py"), "hook/daily"),
     Capability("event_pipeline", ("event-log-writer.py", "event_log_writer.py", "event_log_reader.py", "event_auto_capture.py", "event_pipeline.py", "extract_experience.py", "proactive_discovery.py", "evolution_consumer.py", "experience_review.py"), "hook/daily"),
     Capability("gep_detection", ("gep_detector.py", "gep_manager.py", "gep_monitor.py", "capability-evolver.py", "capability_evolver.py"), "hook/daily/weekly"),
-    Capability("growth_extraction", ("growth_extractor.py", "evolution_engine.py", "evolution_orchestrator.py"), "daily"),
+    Capability("growth_extraction", ("growth_extractor.py", "evolution_engine.py"), "daily"),
     Capability("twin_audit", ("audit_engine.py", "proposal-tracker.py"), "weekly"),
     Capability("approval", ("feishu_callback.py",), "approval_provider"),
     Capability("safe_deploy", ("code_compiler.py", "sica_guard.py", "config_guard.py", "version_manager.py"), "approval/workflow"),
@@ -51,22 +51,23 @@ def triggers() -> Dict[str, str]:
 def missing_runtime_triggers(runtime: object) -> List[str]:
     """Return whitepaper capabilities with no matching standard runtime route."""
     jobs = set(getattr(getattr(runtime, "scheduler", None), "jobs", {}))
+    # 钩子/请求路径驱动，不需要调度作业。
     hooked = {"hot_capture", "hybrid_recall", "graph_activation", "semantic_cache", "context_compaction",
               "event_pipeline", "gep_detection", "approval", "safe_deploy", "command_and_meta_evolution",
               "path_rules", "golden_paths"}
-    # Current runtimes may expose individual maintenance jobs or the four
-    # durable pipelines.  Treat either route as an executable capability.
+    # 项 21：按 runtime.py 实际注册的调度作业（daily-maintenance / weekly-governance /
+    # daily-digest / watchdog）映射能力，不再用 deep-sleep-agent / nightly-growth-pipeline
+    # 等从未注册的陈旧作业名。
     scheduled = {
-        "durable_storage": ("daily-maintenance", "deep-sleep-agent", "nightly-growth-pipeline"),
-        "consolidation": ("daily-maintenance", "memory-consolidator", "nightly-growth-pipeline"),
-        "wiki_graph_sync": ("daily-maintenance", "wiki-sync", "nightly-maintenance-pipeline"),
-        "reviews_quality": ("daily-maintenance", "weekly-governance", "daily-digest", "evening-summary-pipeline"),
-        "archive_cleanup": ("daily-maintenance", "weekly-governance", "session-cleanup",
-                            "nightly-maintenance-pipeline", "weekly-archive-pipeline"),
-        "skill_lifecycle": ("weekly-governance", "workflow-distillation", "nightly-growth-pipeline"),
-        "growth_extraction": ("weekly-governance", "growth-event-clustering", "nightly-growth-pipeline"),
-        "twin_audit": ("weekly-governance", "growth-audit", "weekly-archive-pipeline"),
-        "proactive_health": ("daily-maintenance", "growth-health", "nightly-growth-pipeline"),
+        "durable_storage": ("daily-maintenance",),
+        "consolidation": ("daily-maintenance",),
+        "wiki_graph_sync": ("daily-maintenance",),
+        "reviews_quality": ("weekly-governance", "daily-digest"),
+        "archive_cleanup": ("daily-maintenance", "weekly-governance"),
+        "skill_lifecycle": ("weekly-governance",),
+        "growth_extraction": ("weekly-governance",),
+        "twin_audit": ("weekly-governance",),
+        "proactive_health": ("daily-maintenance", "weekly-governance"),
     }
     return [capability.name for capability in CAPABILITIES
             if capability.name not in hooked and (

@@ -68,11 +68,14 @@ class FTSRebuilder:
 
 class DeepSleepMaintenance:
     """Consolidate, remove expired hot sessions, rebuild FTS and report evidence."""
-    def __init__(self, workspace: str, metadata_db: str):
+    def __init__(self, workspace: str, metadata_db: str, embedding_provider=None):
         self.root = Path(workspace); self.journal = HotMemoryJournal(str(self.root / "memory" / "hot"))
         self.fts = FTSRebuilder(metadata_db)
+        self.embedding_provider = embedding_provider
     def run(self) -> Dict[str, Any]:
-        promoted = MemoryConsolidator().run_nightly_consolidation()
+        promoted = MemoryConsolidator(
+            embedding_provider=self.embedding_provider, root=self.root
+        ).run_nightly_consolidation()
         indexed = self.fts.rebuild()["indexed"]
         report = {"at": datetime.now(timezone.utc).isoformat(), "promoted": promoted, "fts_indexed": indexed}
         path = self.root / "memory" / "maintenance" / "deep-sleep.json"
