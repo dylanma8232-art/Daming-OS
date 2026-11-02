@@ -120,7 +120,14 @@ jobs:
           IS_DRAFT=$(gh api "repos/$REPO/pulls/$PR_NUMBER" -q '.draft')
           if [ "$IS_DRAFT" = "true" ]; then
             echo "Draft PR detected, marking ready for review..."
-            gh pr ready "$PR_NUMBER" -R "$REPO"
+            gh api --method POST "graphql" -f query='
+              mutation {
+                markPullRequestReadyForReview(input: {pullRequestId: "'$(gh api repos/$REPO/pulls/$PR_NUMBER -q .node_id)'"}) {
+                  pullRequest {
+                    isDraft
+                  }
+                }
+              }' >/dev/null
           else
             echo "PR already ready for review."
           fi
@@ -133,7 +140,7 @@ jobs:
         run: |
           set -eu
           # 已有本人 approval 会导致重复 review 报错，忽略即可
-          gh pr review "$PR_NUMBER" -R "$REPO" --approve --body "Auto-approved by Jules auto-merge (CI-gated)." || echo "approve skipped (already reviewed)"
+          gh api --method POST "repos/$REPO/pulls/$PR_NUMBER/reviews" -f event="APPROVE" -f body="Auto-approved by Jules auto-merge (CI-gated)." || echo "approve skipped (already reviewed)"
 
       - name: Wait for CI then merge
         if: steps.identify.outputs.is_jules == 'true'
@@ -254,10 +261,12 @@ jobs:
           fi
 
           echo "Merging PR #$PR_NUMBER..."
-          # --admin 兜底：即使将来误配了 required review / branch protection 也能合并；
           # squash 保留单 PR 单 commit 的线性历史。
-          if gh pr merge "$PR_NUMBER" -R "$REPO" --squash --delete-branch --admin; then
+          if gh api -X PUT "repos/$REPO/pulls/$PR_NUMBER/merge" -f merge_method="squash"; then
             echo "Merged."
+            # Delete branch
+            REF=$(gh api "repos/$REPO/pulls/$PR_NUMBER" -q '.head.ref')
+            gh api -X DELETE "repos/$REPO/git/refs/heads/$REF" || true
             exit 0
           fi
 
@@ -267,7 +276,9 @@ jobs:
           sleep 15
           SHA=$(gh api "repos/$REPO/pulls/$PR_NUMBER" -q '.head.sha')
           wait_for_ci || exit $?
-          gh pr merge "$PR_NUMBER" -R "$REPO" --squash --delete-branch --admin
+          gh api -X PUT "repos/$REPO/pulls/$PR_NUMBER/merge" -f merge_method="squash"
+          REF=$(gh api "repos/$REPO/pulls/$PR_NUMBER" -q '.head.ref')
+          gh api -X DELETE "repos/$REPO/git/refs/heads/$REF" || true
 
       - name: Close linked issues
         if: steps.identify.outputs.is_jules == 'true'
