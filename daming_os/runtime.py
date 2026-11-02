@@ -74,31 +74,35 @@ class DamingRuntime:
         # relative paths.  Bootstrap it before constructing the adapter so a
         # standalone runtime really writes under the requested workspace.
         config.WORKSPACE_ROOT = str(self.workspace)
-        bus.configure_log_path(str(self.workspace / "memory" / "event_logs.jsonl"))
-        self.memory_migration = MemoryMigrator(str(self.workspace))
-        self.memory_migration.initialize()
-        self.proposals = ProposalStore()
-        self.adapter = adapter or DamingAdapter(proposal_store=self.proposals)
-        self.maintenance = MemoryMaintenance(str(self.workspace))
-        self.deep_sleep = DeepSleepMaintenance(str(self.workspace), str(self.workspace / "memory" / "memory_meta.db"))
-        self.session_cleaner = SessionCleaner(str(self.workspace / "memory" / "hot"))
-        self.session_watchdog = SessionWatchdog(str(self.workspace / "memory" / "sessions"))
-        self.memory_health = MemoryHealthcheck(str(self.workspace))
-        self.file_tracker = FileTracker(str(self.workspace / "memory" / "file-tracker.json"))
-        self.sica = SicaGuard(str(self.workspace / "memory" / "sica-audit.jsonl"))
-        self.version_manager = VersionManager(str(self.workspace / "memory" / "versions.jsonl"))
-        self.config_guard = ConfigGuard(str(self.workspace / "memory" / "config.hash"))
-        self.system_health = HealthMonitor(str(self.workspace / "memory" / "health-reports"))
-        self.golden_paths = GoldenPathStore(str(self.workspace / "memory" / "golden-paths"))
-        self.reviews = MemoryReviewService(str(self.workspace))
-        self.glacier = GlacierStore(str(self.workspace))
-        self.skill_usage = SkillUsageLedger(str(self.workspace / "memory" / "skill-usage.jsonl"))
-        self.wiki = WikiSynchronizer(
-            str(self.workspace / "wiki" / "main"),
-            wiki_provider or FilesystemWikiProvider(str(self.workspace / "memory" / "wiki-mirror")),
-        )
+        self._init_memory_subsystems(adapter, wiki_provider)
 
         self.growth_ledger = GrowthLedger()
+        self._init_growth_subsystems(auditor, approval_notifier)
+        self._init_scheduling(runtime_config, skill_dirs, daily_digest_enabled, watchdog_enabled, start_scheduler)
+
+    def _init_scheduling(self, runtime_config: Dict[str, Any], skill_dirs: Iterable[str],
+                         daily_digest_enabled: bool, watchdog_enabled: bool,
+                         start_scheduler: bool) -> None:
+        self.scheduler = DurableScheduler(
+            str(self.workspace / ".daming-os" / "scheduler-state.json"),
+            timezone_name=str(runtime_config.get("timezone", "local")),
+        )
+        self._approval_reminder_state = self.workspace / ".daming-os" / "approval-reminders.json"
+        self.skills = SkillLazyLoader([str(self.workspace / "skills" / "auto-generated"), *skill_dirs])
+        self.skills.discover()
+        self.scheduler.schedule("daily-maintenance", "daily@02:30", self._run_daily_maintenance)
+        self.scheduler.schedule("weekly-governance", "weekly@Sun@23:30", self._run_weekly_governance)
+        if daily_digest_enabled:
+            self.scheduler.schedule("daily-digest", "daily@23:00", self._run_daily_digest)
+        if watchdog_enabled:
+            self.scheduler.schedule("watchdog", "every:1800", self._run_watchdog)
+        self.scheduler.defer_new_jobs()
+        self.hooks = DamingHookBridge(adapter=self.adapter, before_turn_callback=self._consume_command,
+                                      after_turn_callback=self.tick, skill_context_callback=self._skill_context)
+        if start_scheduler:
+            self.start_scheduler()
+
+    def _init_growth_subsystems(self, auditor: Optional[BuilderReviewerAudit], approval_notifier: Optional[ApprovalNotifier]) -> None:
         self.evolution_workflow = EvolutionWorkflow(
             self.proposals,
             WorkspaceProposalValidator(str(self.workspace)),
@@ -122,24 +126,31 @@ class DamingRuntime:
         self.growth_health = GrowthHealthInspector()
         self.quality = QualityGate()
         self.release_ledger = ReleaseLedger(str(self.workspace / "memory" / "version-changelog.jsonl"))
-        self.scheduler = DurableScheduler(
-            str(self.workspace / ".daming-os" / "scheduler-state.json"),
-            timezone_name=str(runtime_config.get("timezone", "local")),
+
+    def _init_memory_subsystems(self, adapter: Optional[DamingAdapter], wiki_provider: Optional[WikiSyncProvider]) -> None:
+        bus.configure_log_path(str(self.workspace / "memory" / "event_logs.jsonl"))
+        self.memory_migration = MemoryMigrator(str(self.workspace))
+        self.memory_migration.initialize()
+        self.proposals = ProposalStore()
+        self.adapter = adapter or DamingAdapter(proposal_store=self.proposals)
+        self.maintenance = MemoryMaintenance(str(self.workspace))
+        self.deep_sleep = DeepSleepMaintenance(str(self.workspace), str(self.workspace / "memory" / "memory_meta.db"))
+        self.session_cleaner = SessionCleaner(str(self.workspace / "memory" / "hot"))
+        self.session_watchdog = SessionWatchdog(str(self.workspace / "memory" / "sessions"))
+        self.memory_health = MemoryHealthcheck(str(self.workspace))
+        self.file_tracker = FileTracker(str(self.workspace / "memory" / "file-tracker.json"))
+        self.sica = SicaGuard(str(self.workspace / "memory" / "sica-audit.jsonl"))
+        self.version_manager = VersionManager(str(self.workspace / "memory" / "versions.jsonl"))
+        self.config_guard = ConfigGuard(str(self.workspace / "memory" / "config.hash"))
+        self.system_health = HealthMonitor(str(self.workspace / "memory" / "health-reports"))
+        self.golden_paths = GoldenPathStore(str(self.workspace / "memory" / "golden-paths"))
+        self.reviews = MemoryReviewService(str(self.workspace))
+        self.glacier = GlacierStore(str(self.workspace))
+        self.skill_usage = SkillUsageLedger(str(self.workspace / "memory" / "skill-usage.jsonl"))
+        self.wiki = WikiSynchronizer(
+            str(self.workspace / "wiki" / "main"),
+            wiki_provider or FilesystemWikiProvider(str(self.workspace / "memory" / "wiki-mirror")),
         )
-        self._approval_reminder_state = self.workspace / ".daming-os" / "approval-reminders.json"
-        self.skills = SkillLazyLoader([str(self.workspace / "skills" / "auto-generated"), *skill_dirs])
-        self.skills.discover()
-        self.scheduler.schedule("daily-maintenance", "daily@02:30", self._run_daily_maintenance)
-        self.scheduler.schedule("weekly-governance", "weekly@Sun@23:30", self._run_weekly_governance)
-        if daily_digest_enabled:
-            self.scheduler.schedule("daily-digest", "daily@23:00", self._run_daily_digest)
-        if watchdog_enabled:
-            self.scheduler.schedule("watchdog", "every:1800", self._run_watchdog)
-        self.scheduler.defer_new_jobs()
-        self.hooks = DamingHookBridge(adapter=self.adapter, before_turn_callback=self._consume_command,
-                                      after_turn_callback=self.tick, skill_context_callback=self._skill_context)
-        if start_scheduler:
-            self.start_scheduler()
 
     def _runtime_config(self) -> Dict[str, Any]:
         """Read optional plugin settings without coupling the host to env files."""
