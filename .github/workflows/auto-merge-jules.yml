@@ -112,9 +112,9 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -eu
-          if gh pr view "$REPO" "$PR_NUMBER" --json isDraft -q '.isDraft' | grep -q 'true'; then
+          if gh pr view "$PR_NUMBER" -R "$REPO" --json isDraft -q '.isDraft' | grep -q 'true'; then
             echo "Draft PR detected, marking ready for review..."
-            gh pr ready "$REPO" "$PR_NUMBER"
+            gh pr ready "$PR_NUMBER" -R "$REPO"
           else
             echo "PR already ready for review."
           fi
@@ -127,7 +127,7 @@ jobs:
         run: |
           set -eu
           # 已有本人 approval 会导致重复 review 报错，忽略即可
-          gh pr review "$REPO" "$PR_NUMBER" --approve --body "Auto-approved by Jules auto-merge (CI-gated)." || echo "approve skipped (already reviewed)"
+          gh pr review "$PR_NUMBER" -R "$REPO" --approve --body "Auto-approved by Jules auto-merge (CI-gated)." || echo "approve skipped (already reviewed)"
 
       - name: Wait for CI then merge
         if: steps.identify.outputs.is_jules == 'true'
@@ -150,7 +150,7 @@ jobs:
           wait_for_ci() {
             local i=0
             while [ "$i" -lt 80 ]; do
-              PR_STATE=$(gh pr view "$REPO" "$PR_NUMBER" --json state,mergeable,mergeable_state -q '[.state, .mergeable, .mergeable_state] | @tsv')
+              PR_STATE=$(gh pr view "$PR_NUMBER" -R "$REPO" --json state,mergeable,mergeable_state -q '[.state, .mergeable, .mergeable_state] | @tsv')
 
               # 期间被合并/关闭则直接成功退出
               STATE=$(printf '%s' "$PR_STATE" | cut -f1)
@@ -168,7 +168,7 @@ jobs:
                 echo "PR is conflicted (state=$MERGEABLE_STATE); trying update_pull_request_branch..."
                 gh api -X PUT "repos/$REPO/pulls/$PR_NUMBER/update-branch" -f update_method="merge" >/dev/null 2>&1 || true
                 sleep 10
-                NEW_STATE=$(gh pr view "$REPO" "$PR_NUMBER" --json state,mergeable,mergeable_state -q '[.state, .mergeable, .mergeable_state] | @tsv')
+                NEW_STATE=$(gh pr view "$PR_NUMBER" -R "$REPO" --json state,mergeable,mergeable_state -q '[.state, .mergeable, .mergeable_state] | @tsv')
                 NEW_MERGEABLE=$(printf '%s' "$NEW_STATE" | cut -f2)
                 if [ "$NEW_MERGEABLE" = "false" ]; then
                   echo "::error::Branch update did not resolve conflicts; needs manual resolution."
@@ -232,12 +232,12 @@ jobs:
           # 前一个 squash 会让 main 前移，后一个 PR 即使无真实冲突也可能
           # 需要更新（CHANGELOG 等追加型冲突在此自动消化）。
           # update_pull_request_branch 能自动合并 base 进 head（无冲突时）。
-          MERGEABLE=$(gh pr view "$REPO" "$PR_NUMBER" --json mergeable -q '.mergeable')
+          MERGEABLE=$(gh pr view "$PR_NUMBER" -R "$REPO" --json mergeable -q '.mergeable')
           BASE_SHA=$(gh api "repos/$REPO/pulls/$PR_NUMBER" -q '.base.sha')
           if [ "$MERGEABLE" = "false" ]; then
             echo "PR became conflicted; trying update_pull_request_branch..."
             gh api -X PUT "repos/$REPO/pulls/$PR_NUMBER/update-branch" -f update_method="merge" || true
-            gh pr view "$REPO" "$PR_NUMBER" --json mergeable -q '.mergeable' | grep -q true || {
+            gh pr view "$PR_NUMBER" -R "$REPO" --json mergeable -q '.mergeable' | grep -q true || {
               echo "::error::Branch update did not resolve conflicts; needs manual resolution."
               exit 3
             }
@@ -250,7 +250,7 @@ jobs:
           echo "Merging PR #$PR_NUMBER..."
           # --admin 兜底：即使将来误配了 required review / branch protection 也能合并；
           # squash 保留单 PR 单 commit 的线性历史。
-          if gh pr merge "$REPO" "$PR_NUMBER" --squash --delete-branch --admin; then
+          if gh pr merge "$PR_NUMBER" -R "$REPO" --squash --delete-branch --admin; then
             echo "Merged."
             exit 0
           fi
@@ -261,7 +261,7 @@ jobs:
           sleep 15
           SHA=$(gh api "repos/$REPO/pulls/$PR_NUMBER" -q '.head.sha')
           wait_for_ci || exit $?
-          gh pr merge "$REPO" "$PR_NUMBER" --squash --delete-branch --admin
+          gh pr merge "$PR_NUMBER" -R "$REPO" --squash --delete-branch --admin
 
       - name: Close linked issues
         if: steps.identify.outputs.is_jules == 'true'
@@ -300,8 +300,8 @@ jobs:
             echo "git pull failed (attempt $attempt/5), retrying..."
             sleep 10
           done
-          TITLE=$(gh pr view "$REPO" "$PR_NUMBER" --json title -q '.title')
-          FILES=$(gh pr view "$REPO" "$PR_NUMBER" --json files -q '.files[].path')
+          TITLE=$(gh pr view "$PR_NUMBER" -R "$REPO" --json title -q '.title')
+          FILES=$(gh pr view "$PR_NUMBER" -R "$REPO" --json files -q '.files[].path')
           PR_URL="https://github.com/$REPO/pull/$PR_NUMBER"
           DATE=$(date -u "+%Y-%m-%d %H:%M")
           {
