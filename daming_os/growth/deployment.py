@@ -86,7 +86,10 @@ class AtomicWorkspaceDeployer:
         target.parent.mkdir(parents=True, exist_ok=True)
         self.backups.mkdir(parents=True, exist_ok=True)
         backup = self._backup(proposal)
-        backup.write_bytes(target.read_bytes() if target.exists() else b"")
+        # 项 9：备份只在首次部署时创建一次；中断重试不得用已部署内容覆写原始备份，
+        # 否则 rollback 无法还原原始文件。
+        if not backup.exists():
+            backup.write_bytes(target.read_bytes() if target.exists() else b"")
         temporary = target.with_name(f".{target.name}.{proposal['id']}.tmp")
         temporary.write_text(source, encoding="utf-8")
         os.replace(temporary, target)

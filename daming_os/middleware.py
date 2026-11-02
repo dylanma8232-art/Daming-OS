@@ -7,8 +7,17 @@ from .events import bus, LogEvent
 
 logger = logging.getLogger("daming_os.middleware")
 
-# Global instances for the decorators to use
-_global_memory = MemorySystem()
+# 项 16：不在 import 时构建 MemorySystem，避免在当前目录生成 memory/、SQLite 与事件订阅；
+# 改为装饰器首次调用时懒加载。
+_global_memory = None
+
+
+def _get_memory():
+    global _global_memory
+    if _global_memory is None:
+        _global_memory = MemorySystem()
+    return _global_memory
+
 
 def attach_memory(auto_recall: bool = False):
     """
@@ -18,9 +27,10 @@ def attach_memory(auto_recall: bool = False):
     def decorator(func: Callable):
         @functools.wraps(func)
         def wrapper(agent_input: str, *args, **kwargs) -> Any:
+            memory = _get_memory()
             # 1. Retrieve Context if auto_recall is enabled
             if auto_recall:
-                context = _global_memory.query(agent_input)
+                context = memory.query(agent_input)
                 kwargs["daming_os_context"] = context
             
             # 2. Execute Agent
@@ -38,7 +48,7 @@ def attach_memory(auto_recall: bool = False):
             if len(result_str) > max_len:
                 result_str = result_str[:max_len] + "... [Result Truncated]"
                 
-            _global_memory.store(f"Input: {cleaned_input_str} | Result: {result_str}")
+            memory.store(f"Input: {cleaned_input_str} | Result: {result_str}")
             return result
         return wrapper
     return decorator

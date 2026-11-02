@@ -2,12 +2,38 @@ import os
 import json
 import time
 import math
-import fcntl
 import logging
 import collections
 from typing import Dict, Any, Optional, List
 
 logger = logging.getLogger("daming_os.memory.cache")
+
+
+def _flock(fileobj, exclusive: bool) -> None:
+    """跨平台建议锁：POSIX 用 fcntl，Windows 用 msvcrt；失败时降级为无锁（尽力而为）。"""
+    try:
+        if os.name == "nt":
+            import msvcrt
+            fileobj.seek(0)
+            msvcrt.locking(fileobj.fileno(), msvcrt.LK_LOCK if exclusive else msvcrt.LK_RLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fileobj.fileno(), fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
+    except (ImportError, OSError):
+        pass
+
+
+def _funlock(fileobj) -> None:
+    try:
+        if os.name == "nt":
+            import msvcrt
+            fileobj.seek(0)
+            msvcrt.locking(fileobj.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fileobj.fileno(), fcntl.LOCK_UN)
+    except (ImportError, OSError):
+        pass
 
 
 def _get_scope_prefix(key: str) -> str:
@@ -64,14 +90,14 @@ class HardenedSemanticCache:
                 return self._in_memory_state
 
             with open(self.cache_file, 'r', encoding='utf-8') as f:
-                fcntl.flock(f, fcntl.LOCK_SH)
+                _flock(f, exclusive=False)
                 try:
                     state = json.load(f)
                     self._in_memory_state = state
                     self._last_mtime = mtime
                     return state
                 finally:
-                    fcntl.flock(f, fcntl.LOCK_UN)
+                    _funlock(f)
         except Exception as e:
             logger.error(f"Failed to load cache: {e}")
             return {"l1_cache": {}, "l2_cache": {}}
@@ -79,11 +105,11 @@ class HardenedSemanticCache:
     def _save_state(self, state: Dict[str, Any]):
         try:
             with open(self.cache_file, 'w', encoding='utf-8') as f:
-                fcntl.flock(f, fcntl.LOCK_EX)
+                _flock(f, exclusive=True)
                 try:
                     json.dump(state, f, ensure_ascii=False, indent=2)
                 finally:
-                    fcntl.flock(f, fcntl.LOCK_UN)
+                    _funlock(f)
             self._in_memory_state = state
             self._last_mtime = os.path.getmtime(self.cache_file)
         except Exception as e:

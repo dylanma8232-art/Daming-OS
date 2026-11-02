@@ -159,7 +159,8 @@ class MemorySystem:
                         if len(user_texts) >= 3:
                             break
             if user_texts:
-                recall_query = "\n".join(user_texts)
+                # 项 6：历史消息与当前输入一并纳入查询，避免相同历史但不同当前问题命中同一缓存
+                recall_query = "\n".join(user_texts + [text])
                 logger.info(f"Multi-turn context aggregated: {repr(recall_query)}")
 
         # The complete isolation scope belongs to the cache key.  A tenant-only

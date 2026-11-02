@@ -11,12 +11,17 @@ from .consolidator import MemoryConsolidator
 
 class MemoryMaintenance:
     """Scheduler-agnostic jobs; a host may call these from cron, a worker or a heartbeat."""
-    def __init__(self, workspace: str):
+    def __init__(self, workspace: str, embedding_provider=None):
         self.root = Path(workspace)
         self.memory = self.root / "memory"
+        self.embedding_provider = embedding_provider
 
     def consolidate(self) -> int:
-        return MemoryConsolidator().run_nightly_consolidation()
+        # 项 5：绑定 self.root，而非进程级 WORKSPACE_ROOT，避免读错队列/写错目录。
+        # 项 3：透传 embedding provider，确保日常维护路径也能提升向量。
+        return MemoryConsolidator(
+            embedding_provider=self.embedding_provider, root=self.root
+        ).run_nightly_consolidation()
 
     def review(self, days: int = 1) -> Path:
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)

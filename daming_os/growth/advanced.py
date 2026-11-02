@@ -184,7 +184,7 @@ class MetaPromptRewriter:
                 "kind": "meta_prompt_rewrite",
                 "artifact_type": "skill",
                 "target_file": f"skills/auto-generated/{proposal['id']}/SKILL.md",
-                "proposed_code": "# Meta prompt improvement\\n\\n" + proposal["instruction"] + "\\n",
+                "proposed_code": "# Meta prompt improvement\n\n" + proposal["instruction"] + "\n",
                 "source_events": proposal["source_events"],
             })
             path.write_text(json.dumps(proposal, ensure_ascii=False, indent=2), encoding="utf-8")
