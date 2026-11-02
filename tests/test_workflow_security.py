@@ -67,3 +67,70 @@ class TestWorkflowSecurity(unittest.TestCase):
         diagnostics = res.stdout + res.stderr
 
         return res.returncode, outputs, diagnostics
+
+    def test_fork_pr_with_jules_text_is_rejected(self):
+        # A fork PR trying to spoof Jules body text
+        code, outputs, stdout = self._run_identify_script(
+            body="PR created automatically by Jules",
+            branch="feature-branch",
+            head_repo="attacker/daming-os",
+            base_repo="daming-os/daming-os",
+            pr_author="attacker",
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(outputs.get("is_jules"), "false")
+        self.assertIn("PR is from a fork", stdout)
+
+    def test_fork_pr_with_jules_branch_is_rejected(self):
+        # A fork PR trying to spoof Jules 15-digit branch name
+        code, outputs, stdout = self._run_identify_script(
+            body="Fix something",
+            branch="jules-123456789012345",
+            head_repo="attacker/daming-os",
+            base_repo="daming-os/daming-os",
+            pr_author="attacker",
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(outputs.get("is_jules"), "false")
+        self.assertIn("PR is from a fork", stdout)
+
+    def test_same_repo_unauthorized_author_is_rejected(self):
+        # A same-repo PR by an unauthorized user with spoofed text
+        code, outputs, stdout = self._run_identify_script(
+            body="PR created automatically by Jules",
+            branch="patch-1",
+            head_repo="daming-os/daming-os",
+            base_repo="daming-os/daming-os",
+            pr_author="untrusted_contributor",
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(outputs.get("is_jules"), "false")
+        self.assertIn("PR author (untrusted_contributor) is not authorized", stdout)
+
+    def test_valid_jules_bot_pr_accepted(self):
+        # Same repo, google-labs-jules[bot], matching body phrase
+        code, outputs, stdout = self._run_identify_script(
+            body="PR created automatically by Jules",
+            branch="jules-fix",
+            head_repo="daming-os/daming-os",
+            base_repo="daming-os/daming-os",
+            pr_author="google-labs-jules[bot]",
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(outputs.get("is_jules"), "true")
+
+    def test_valid_jules_branch_pr_accepted(self):
+        # Same repo, google-labs-jules, matching 15 digit branch
+        code, outputs, stdout = self._run_identify_script(
+            body="Automated update",
+            branch="jules-123456789012345",
+            head_repo="daming-os/daming-os",
+            base_repo="daming-os/daming-os",
+            pr_author="google-labs-jules",
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(outputs.get("is_jules"), "true")
+
+
+if __name__ == "__main__":
+    unittest.main()
