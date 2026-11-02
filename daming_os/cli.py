@@ -626,7 +626,7 @@ def status(workspace: str) -> Dict[str, Any]:
             "scheduler_state": state, "latest_task_run": latest_run}
 
 
-def main() -> None:
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Daming OS host-neutral plugin CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -662,36 +662,47 @@ def main() -> None:
     maintain_parser.add_argument("--dir", default=".", help="Workspace directory")
     maintain_parser.add_argument("--review-days", type=int, default=1)
     maintain_parser.add_argument("--consolidate", action="store_true")
+    return parser
 
+
+def _execute_command(args: argparse.Namespace) -> Dict[str, Any]:
+    if args.command == "init":
+        return init_workspace(args.dir, args.integration)
+    elif args.command == "install":
+        return install_host(args.host_dir, args.state_dir, args.integration, args.force)
+    elif args.command == "doctor":
+        return doctor(args.dir)
+    elif args.command == "status":
+        return status(args.dir)
+    elif args.command == "migrate":
+        return MemoryMigrator(args.dir).migrate()
+    elif args.command == "approvals":
+        return manage_approval(
+            args.dir,
+            args.approval_action,
+            getattr(args, "proposal_id", ""),
+            getattr(args, "otp", ""),
+            getattr(args, "reason", ""),
+        )
+    else:
+        from .memory.maintenance import MemoryMaintenance
+        maintenance = MemoryMaintenance(args.dir)
+        result = {"review": str(maintenance.review(args.review_days))}
+        if args.consolidate:
+            result["consolidated"] = maintenance.consolidate()
+        return result
+
+
+def main() -> None:
+    parser = _build_parser()
     args = parser.parse_args()
+
     try:
-        if args.command == "init":
-            result = init_workspace(args.dir, args.integration)
-        elif args.command == "install":
-            result = install_host(args.host_dir, args.state_dir, args.integration, args.force)
-        elif args.command == "doctor":
-            result = doctor(args.dir)
-        elif args.command == "status":
-            result = status(args.dir)
-        elif args.command == "migrate":
-            result = MemoryMigrator(args.dir).migrate()
-        elif args.command == "approvals":
-            result = manage_approval(
-                args.dir,
-                args.approval_action,
-                getattr(args, "proposal_id", ""),
-                getattr(args, "otp", ""),
-                getattr(args, "reason", ""),
-            )
-        else:
-            from .memory.maintenance import MemoryMaintenance
-            maintenance = MemoryMaintenance(args.dir)
-            result = {"review": str(maintenance.review(args.review_days))}
-            if args.consolidate:
-                result["consolidated"] = maintenance.consolidate()
+        result = _execute_command(args)
     except (KeyError, OSError, RuntimeError, ValueError) as exc:
         print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False, indent=2))
         raise SystemExit(2)
+
     print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
     if args.command in {"doctor", "install"} and not result.get("ok", False):
         raise SystemExit(1)
