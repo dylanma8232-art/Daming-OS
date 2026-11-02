@@ -117,7 +117,8 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -eu
-          if gh pr view "$PR_NUMBER" -R "$REPO" --json isDraft -q '.isDraft' | grep -q 'true'; then
+          IS_DRAFT=$(gh api "repos/$REPO/pulls/$PR_NUMBER" -q '.draft')
+          if [ "$IS_DRAFT" = "true" ]; then
             echo "Draft PR detected, marking ready for review..."
             gh pr ready "$PR_NUMBER" -R "$REPO"
           else
@@ -155,11 +156,11 @@ jobs:
           wait_for_ci() {
             local i=0
             while [ "$i" -lt 80 ]; do
-              PR_STATE=$(gh pr view "$PR_NUMBER" -R "$REPO" --json state,mergeable,mergeable_state -q '[.state, .mergeable, .mergeable_state] | @tsv')
+              PR_STATE=$(gh api "repos/$REPO/pulls/$PR_NUMBER" -q '[.state, .mergeable, .mergeable_state] | @tsv')
 
               # 期间被合并/关闭则直接成功退出
               STATE=$(printf '%s' "$PR_STATE" | cut -f1)
-              if [ "$STATE" != "OPEN" ]; then
+              if [ "$STATE" != "open" ]; then
                 echo "PR state is $STATE, nothing to merge."
                 return 0
               fi
@@ -173,7 +174,7 @@ jobs:
                 echo "PR is conflicted (state=$MERGEABLE_STATE); trying update_pull_request_branch..."
                 gh api -X PUT "repos/$REPO/pulls/$PR_NUMBER/update-branch" -f update_method="merge" >/dev/null 2>&1 || true
                 sleep 10
-                NEW_STATE=$(gh pr view "$PR_NUMBER" -R "$REPO" --json state,mergeable,mergeable_state -q '[.state, .mergeable, .mergeable_state] | @tsv')
+                NEW_STATE=$(gh api "repos/$REPO/pulls/$PR_NUMBER" -q '[.state, .mergeable, .mergeable_state] | @tsv')
                 NEW_MERGEABLE=$(printf '%s' "$NEW_STATE" | cut -f2)
                 if [ "$NEW_MERGEABLE" = "false" ]; then
                   echo "::error::Branch update did not resolve conflicts; needs manual resolution."
@@ -237,12 +238,12 @@ jobs:
           # 前一个 squash 会让 main 前移，后一个 PR 即使无真实冲突也可能
           # 需要更新（CHANGELOG 等追加型冲突在此自动消化）。
           # update_pull_request_branch 能自动合并 base 进 head（无冲突时）。
-          MERGEABLE=$(gh pr view "$PR_NUMBER" -R "$REPO" --json mergeable -q '.mergeable')
+          MERGEABLE=$(gh api "repos/$REPO/pulls/$PR_NUMBER" -q '.mergeable')
           BASE_SHA=$(gh api "repos/$REPO/pulls/$PR_NUMBER" -q '.base.sha')
           if [ "$MERGEABLE" = "false" ]; then
             echo "PR became conflicted; trying update_pull_request_branch..."
             gh api -X PUT "repos/$REPO/pulls/$PR_NUMBER/update-branch" -f update_method="merge" || true
-            gh pr view "$PR_NUMBER" -R "$REPO" --json mergeable -q '.mergeable' | grep -q true || {
+            gh api "repos/$REPO/pulls/$PR_NUMBER" -q '.mergeable' | grep -q true || {
               echo "::error::Branch update did not resolve conflicts; needs manual resolution."
               exit 3
             }
@@ -305,8 +306,8 @@ jobs:
             echo "git pull failed (attempt $attempt/5), retrying..."
             sleep 10
           done
-          TITLE=$(gh pr view "$PR_NUMBER" -R "$REPO" --json title -q '.title')
-          FILES=$(gh pr view "$PR_NUMBER" -R "$REPO" --json files -q '.files[].path')
+          TITLE=$(gh api "repos/$REPO/pulls/$PR_NUMBER" -q '.title')
+          FILES=$(gh api "repos/$REPO/pulls/$PR_NUMBER/files" -q '.[].filename')
           PR_URL="https://github.com/$REPO/pull/$PR_NUMBER"
           DATE=$(date -u "+%Y-%m-%d %H:%M")
           {
