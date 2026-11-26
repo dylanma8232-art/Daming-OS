@@ -183,6 +183,6 @@ Every CLI subcommand emits structured JSON for clean scripting and diagnostics:
 
 ## Author
 
-Built by **[Dylan.ma](https://github.com/dylanma8232-art)** · **[Visit profile for more open-source projects →](https://github.com/dylanma8232-art)**
+Built by **[dylanma8232-art](https://github.com/dylanma8232-art)** · **[Visit profile for more open-source projects →](https://github.com/dylanma8232-art)**
 
 Licensed under [CC BY-NC-SA 4.0](LICENSE). Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).

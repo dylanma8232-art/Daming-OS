@@ -191,6 +191,6 @@ memory = MemorySystem(embedding_provider=embeddings)
 
 ## 关于作者
 
-作者：**[Dylan.ma](https://github.com/dylanma8232-art)** · **[返回个人主页查看更多开源项目 →](https://github.com/dylanma8232-art)**
+作者：**[dylanma8232-art](https://github.com/dylanma8232-art)** · **[返回个人主页查看更多开源项目 →](https://github.com/dylanma8232-art)**
 
 本项目基于 [CC BY-NC-SA 4.0](LICENSE) 协议开源。欢迎提交 Issue 或 PR（见 [CONTRIBUTING.md](CONTRIBUTING.md)）。
