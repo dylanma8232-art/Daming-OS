@@ -1,8 +1,8 @@
 <div align="center">
 
-# Daming-OS
+# 大明 AI 记忆成长系统 (`Daming-OS`)
 
-**面向任意智能体运行时的零核心依赖记忆 3.0 与成长自愈 2.0 底座**
+**让你的 AI 越用越聪明 —— 给任意智能体装上长期记忆、防烧钱预算控制与自动排错自救能力**
 
 <p>
   <a href="README.md"><img alt="简体中文" src="https://img.shields.io/badge/语言-简体中文-c8521b?style=flat-square"></a>
