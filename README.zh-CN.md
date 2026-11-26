@@ -1,67 +1,72 @@
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/banner-dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="assets/banner-light.png">
-  <img alt="Daming-OS — 面向任意智能体运行时的记忆与自愈底座" src="assets/banner-dark.png" width="100%">
-</picture>
-
 <div align="center">
 
+# Daming-OS
+
+**面向任意智能体运行时的零核心依赖记忆 3.0 与成长自愈 2.0 底座**
+
 <p>
-  <a href="README.md"><img alt="English" src="https://img.shields.io/badge/Language-English-2b2927?style=flat-square"></a>
-  <a href="README.zh-CN.md"><img alt="简体中文" src="https://img.shields.io/badge/语言-简体中文-c8521b?style=flat-square"></a>
+  <a href="README.md"><img alt="简体中文" src="https://img.shields.io/badge/语言-简体中文-c8521b?style=flat-square"></a>
+  <a href="README_EN.md"><img alt="English" src="https://img.shields.io/badge/Language-English-2b2927?style=flat-square"></a>
   <a href="setup.py"><img alt="Version 1.5.0" src="https://img.shields.io/badge/Version-1.5.0-3776ab?style=flat-square"></a>
-  <a href="setup.py"><img alt="零核心第三方依赖" src="https://img.shields.io/badge/核心依赖-零第三方库-2e7d32?style=flat-square"></a>
+  <a href="setup.py"><img alt="Python 3.9+" src="https://img.shields.io/badge/Python-3.9%2B-3776ab?style=flat-square"></a>
+  <a href="setup.py"><img alt="零第三方核心依赖" src="https://img.shields.io/badge/核心依赖-零第三方库-2e7d32?style=flat-square"></a>
   <a href="LICENSE"><img alt="许可证: CC BY-NC-SA 4.0" src="https://img.shields.io/badge/License-CC_BY--NC--SA_4.0-b45309?style=flat-square"></a>
 </p>
 
 <p>
-  <b>支持接入</b>&nbsp;
+  <b>宿主中立 · 无缝桥接</b>&nbsp;
   <img alt="OpenClaw" src="https://img.shields.io/badge/OpenClaw-18181B?style=flat-square">
   <img alt="Codex" src="https://img.shields.io/badge/Codex-18181B?style=flat-square">
   <img alt="Claude Agents" src="https://img.shields.io/badge/Claude_Agents-D97757?style=flat-square&logo=claude&logoColor=white">
   <img alt="LangGraph" src="https://img.shields.io/badge/LangGraph-27272A?style=flat-square">
-  <img alt="自研 Python Agent" src="https://img.shields.io/badge/Custom_Python_Agents-3776AB?style=flat-square&logo=python&logoColor=white">
+  <img alt="Custom Python Agents" src="https://img.shields.io/badge/自研_Python_Agent-3776AB?style=flat-square&logo=python&logoColor=white">
 </p>
 
-[30 秒一键接入](#30-秒一键接入) · [闭环架构图](#系统架构与闭环流转) · [通用接入方式](#通用-agent-接入方式) · [English](README.md)
+[解决什么问题](#解决什么问题) · [30 秒无侵入接入](#30-秒无侵入接入) · [双闭环架构全景](#双闭环架构全景) · [四种接入模式](#四种接入模式) · [CLI 运维命令速查](#cli-运维命令速查) · [更新日志](CHANGELOG.md)
 
 </div>
 
 ---
 
-把自主智能体直接放到生产或高权限环境里「裸奔」，通常会撞上三个致命问题：
+## 解决什么问题
 
-- **上下文爆仓烧钱**：对话与工具日志逐轮堆积，Token 账单指数级飙升，直至撞上上下文上限崩溃。
-- **自演化越权风险**：缺乏静态审计就直接执行 Agent 生成的代码或补丁，极易触发危险导入或文件系统越权修改。
-- **报错死循环风暴**：运行异常后陷入盲目重试与自我纠错死循环，短时间内榨干全部 API 配额。
+把自主智能体直接放到真实生产或高权限环境里「裸奔」，通常会撞上三类结构性故障：
 
-**Daming-OS** 是面向任意智能体运行时的**工业级记忆分层与异常自愈底座**。核心包**零第三方依赖**，不绑定 OpenClaw 或任何特定框架——只要宿主接入标准生命周期、审批与部署契约，即可立刻获得冷温热三层记忆、防爆仓截断网关、隔离沙箱静态安检与支持冷备回滚的自愈演化闭环。
+- **上下文爆仓与账单失控**：多轮历史、工具回执与嵌套记忆无限膨胀，几轮之后要不撞上上下文窗口上限崩溃，要不把 API 预算烧穿。
+- **自修改与动态执行越权**：缺乏独立编译沙箱与静态审计就直接执行 Agent 生成的补丁，极易触发危险导入或文件系统反射篡改。
+- **报错死循环与重复踩坑**：遇到运行时异常只会在当前窗口盲目重试，既留不下负反馈教训，也无法把跑通的成功经验沉淀成可复用技能。
+
+**`Daming-OS`** 是一套**核心包零第三方依赖、不绑定任何特定框架**的智能体记忆与自愈运行底座。通过标准生命周期契约（`before_turn` / `after_turn` / `error`），任意 Python Agent 在 1 分钟内即可接入**冷温热三层记忆 + 知识图谱扩散**与**静态沙箱安检 + 冷备回滚自愈**双闭环。
 
 ---
 
-## 30 秒一键接入
+## 30 秒无侵入接入
 
-核心包无第三方运行时依赖（`Python >= 3.9`），一条命令即可在现有 Agent 项目内生成隔离桥接层：
+核心包仅依赖 Python 标准库（`Python >= 3.9`）。在现有 Agent 项目根目录执行：
 
 ```bash
 pip install "daming-os @ git+https://github.com/dylanma8232-art/Daming-OS.git"
 daming-os install --host-dir .
 ```
 
-安装器会自动生成 `daming_bootstrap.py`、隔离的 `.daming/` 状态目录、宿主专属稳定 Agent ID 以及防止隐私记忆误提交的 `.daming/.gitignore`，并现场跑通一次**「写入 → 整理 → 召回」**冒烟自检，全程不触碰宿主原有的提示词与密钥文件。
+`install` 命令会在不改动宿主原有 Prompt 与密钥文件的前提下完成四件事：
+1. 生成隔离状态目录 `.daming/` 与防隐私泄露的 `.daming/.gitignore`；
+2. 绑定宿主专属稳定 `agent_id`；
+3. 生成开箱即用的懒加载桥接层 `daming_bootstrap.py`；
+4. 现场跑通一次 **「热捕获 → 记忆整合 → 检索召回」** 端到端冒烟自检。
 
-在宿主代码中三行接入：
+在你的 Agent 主循环中**三行挂载**：
 
 ```python
 from daming_bootstrap import daming
 
 session_id = daming.new_session_id()
-ctx = daming.before_turn("检索上次确认的架构约束", session_id=session_id)
-# 执行宿主自己的模型与工具调用，可按需注入 ctx["daming_memories"]
-daming.after_turn("检索上次确认的架构约束", "已按约束执行完毕。", session_id=session_id)
+ctx = daming.before_turn("检索上次确认的发布门禁约束", session_id=session_id)
+# 运行宿主自身的模型与工具调用，可按需将 ctx["daming_memories"] 注入上下文
+daming.after_turn("检索上次确认的发布门禁约束", "已按约束核验通过。", session_id=session_id)
 ```
 
-如果宿主支持统一的 Hook 注册器，一行即可挂载完整生命周期（`before_turn` / `after_turn` / `error`）：
+若宿主支持统一 Hook 注册接口，一行即可接管完整生命周期：
 
 ```python
 daming.install_hooks(agent.register_hook)
@@ -69,97 +74,123 @@ daming.install_hooks(agent.register_hook)
 
 ---
 
-## 系统架构与闭环流转
+## 双闭环架构全景
 
-Daming-OS 的记忆系统与成长自愈系统通过事件总线与结构化日志通道深度耦合，形成「执行 → 捕获 → 审计 → 自愈 → 沉淀」闭环：
+Daming-OS 并非拼凑的独立插件，而是通过统一事件总线将 **记忆系统 3.0** 与 **成长自愈系统 2.0** 串成闭环——已验证的自愈经验会即时回写至记忆库、知识图谱与标准 `SKILL.md` 技能目录：
 
-<p align="center">
-  <img src="assets/openclaw_flow.png" alt="Daming-OS 闭环架构流转图" width="840">
-</p>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/architecture-zh-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="assets/architecture-zh-light.png">
+  <img alt="Daming-OS 记忆系统 3.0 与成长自愈系统 2.0 双闭环架构图" src="assets/architecture-zh-dark.png" width="100%">
+</picture>
 
-| 核心模块 | 解决的裸奔风险 | Daming-OS 的工程机制 |
+| 核心子系统 | 关键能力模块 | 工程实现与边界保障 |
 |---|---|---|
-| **冷温热三层记忆与防爆仓网关** | 上下文膨胀、检索慢 | 文件锁 + 两级热缓存微秒级响应；密集向量与全文稀疏混合检索；写入清洗标签、超限自适应精简与物理截断 |
-| **隔离沙箱与静态安检门** | 越权执行、高危反射修改 | 隔离沙箱内执行编译检查、AST 静态分析与冒烟测试，默认拦截危险导入与文件系统反射篡改 |
-| **异常捕获与多智能体博弈自愈** | 报错死循环、重复踩坑 | 指数衰退滑动窗口计算成长分，按需触发红蓝白三方博弈生成修复补丁，并将报错沉淀为负反馈记忆 |
-| **可恢复演化状态机** | 自更新把线上改崩 | 严格遵循 `proposed → validated → approved → deployed → verified/rolled_back`，部署前自动冷备、支持原子回滚 |
-| **多租户与敏感凭据治理** | 跨会话串味、密钥泄露 | 写入前自动脱敏凭据、强制绑定 `tenant / agent / session` 作用域，默认拒绝读取旧版无作用域数据 |
+| **记忆系统 3.0** | **Hot → Warm → Glacier 三层架构** | 文件锁 + 两级热缓存微秒级读取；SQLite FTS5 稀疏检索 + 可选语义向量混合召回；夜间整合与 Glacier 无损冷归档恢复 |
+| **知识图谱扩散** | **统一 `wiki_edges` 动态权重图** | 按关系边动态赋权（`depends_on=1.0` / `causes=0.9` / `extends=0.8`）执行图激活扩散；支持 Bitable 拉取合并双向同步 |
+| **防爆仓预算网关** | **反嵌套清洗 + 滑动窗口截断** | 自动剥离历史 `<MemoryHint>` 标签防递归套娃；启发式拼接最近 3 轮有效意图；执行物理字符上限硬截断 |
+| **静态安检门与沙箱** | **编译检查 + AST 静态审计** | 在隔离沙箱内对候选补丁做语法编译、AST 危险节点拦截与冒烟测试，默认阻断越权导入与反射写入 |
+| **成长与自愈 2.0** | **五类 GEP 信号 + 红蓝白博弈** | 指数衰减窗口评估重复异常，触发红蓝白多视角审议合成补丁；高频有效经验自动蒸馏为标准 `SKILL.md` 懒加载 |
+| **可恢复演化状态机** | **一次性 OTP 审批 + 冷备回滚** | 严格遵循 `proposed → validated → approved → deployed → verified/rolled_back`，部署前自动冷备，校验失败毫秒级原子回滚 |
+| **多租户与凭据治理** | **作用域隔离 + 敏感信息脱敏** | 写入前自动清洗密钥/Token，强制绑定 `tenant / agent / session` 作用域，严防跨会话串味与未隔离数据读取 |
 
 ---
 
-## 通用 Agent 接入方式
+## 四种接入模式
 
-### 1. 显式适配器接入（`DamingAdapter`）
+### 1. 显式多租户适配器（`DamingAdapter`）
+
+适合 SaaS 多租户或微服务形态的 Agent 编排层：
 
 ```python
 from daming_os import AgentContext, DamingAdapter
 
 adapter = DamingAdapter()
 context = AgentContext(
-    agent_id="research-agent",
+    agent_id="release-auditor",
     session_id="session-42",
-    tenant_id="team-a",
-    metadata={"trace_id": "trace-123"},
+    tenant_id="team-core",
+    metadata={"trace_id": "req-9812"},
 )
-memories = adapter.before_turn("检查发布前阻断项", context)
-# 宿主执行模型推理与工具调用
-adapter.after_turn("检查发布前阻断项", "已完成核验。", context)
+
+memories = adapter.before_turn("核对数据库迁移回滚预案", context)
+# 执行宿主模型推理与工具链
+adapter.after_turn("核对数据库迁移回滚预案", "回滚预案已确认。", context)
 ```
 
-配合 `EvolutionWorkflow` 可自由注入宿主自定义的 `validator`、`approvals`、`deployer` 与 `verifier`，不把任何聊天平台或部署工具硬编码进底座。
+### 2. 独立常驻运行时与自动维护调度（`DamingRuntime`）
 
-### 2. 独立运行时与后台维护调度（`DamingRuntime`）
+内置持久化 `Scheduler`，无需依赖外部系统 `cron`：
 
 ```python
 from daming_os import DamingRuntime
 
 runtime = DamingRuntime("./.daming", skill_dirs=["./skills"])
 runtime.hooks.install(agent.register_hook)
-runtime.start_scheduler(poll_seconds=30)  # 可选：仅常驻守护进程需要开启
+runtime.start_scheduler(poll_seconds=30)  # 仅常驻守护进程按需开启
 ```
 
-默认后台维护克制且可预期：
-- **`daily-maintenance`（每日 02:30）**：深度睡眠记忆整合、健康巡检与超时审批提醒（24 小时冷却）。
-- **`weekly-governance`（每周日 23:30）**：保留期清理与经验生命周期流转（`pending → verified → deprecated`，仅已验证经验可蒸馏为待审技能候选）。
-- **`daily-digest` 与 `watchdog`**：默认关闭，按需显式开启。
+默认维护策略克制且确定：
+- **`daily-maintenance`（每日 02:30）**：深度睡眠记忆整合、异常巡检（仅异常落详细报告）与超时待审提醒（24h 冷却）。
+- **`weekly-governance`（每周日 23:30）**：保留期清理与经验生命周期流转（`pending → verified → deprecated`）。
+- **`daily-digest` / `watchdog`**：默认关闭，可在 `daming-os.json` 中显式启用。
 
-### 3. 按需接入语义向量检索
+### 3. 按需挂载语义向量检索与可选扩展
 
-仅在需要时安装可选扩展（`[vector]`、`[llm]`、`[full]`），支持任意 OpenAI 兼容的 Embedding 接口：
+核心包保持零依赖，需要高维向量检索、LLM 蒸馏或精准分词计数时再按需安装扩展：
+
+```bash
+pip install "daming-os[vector] @ git+https://github.com/dylanma8232-art/Daming-OS.git"  # LanceDB 向量支持
+pip install "daming-os[llm] @ git+https://github.com/dylanma8232-art/Daming-OS.git"     # LiteLLM 多模型接口
+pip install "daming-os[full] @ git+https://github.com/dylanma8232-art/Daming-OS.git"    # 完整可选依赖集
+```
+
+对接任意 OpenAI 兼容的 Embedding 服务：
 
 ```python
 from daming_os import OpenAICompatibleEmbeddingProvider
 from daming_os.memory.core import MemorySystem
 
 embeddings = OpenAICompatibleEmbeddingProvider(
-    model="your-embedding-model",
-    base_url="https://your-endpoint/v1",
+    model="text-embedding-3-small",
+    base_url="https://your-openai-compatible-endpoint/v1",
 )
 memory = MemorySystem(embedding_provider=embeddings)
 ```
 
-### 4. 本地命令行审批与体检
+### 4. 自定义演化工作流回调（`EvolutionWorkflow`）
 
-无需依赖外部聊天机器人即可在本地完成一次性 OTP 审批（口令仅终端显示一次、永不落日志）与状态诊断：
-
-```bash
-daming-os status --dir ./.daming
-daming-os doctor --dir ./.daming
-daming-os approvals --dir ./.daming list
-daming-os approvals --dir ./.daming issue <proposal-id>
-daming-os approvals --dir ./.daming approve <proposal-id> <otp>
-```
+可将宿主自己的测试器、飞书/Slack 审批器与发布器注入 `EvolutionWorkflow`，保持底座本身零平台耦合。
 
 ---
 
-## 安全与可用性原则
+## CLI 运维命令速查
 
-Daming-OS 对宿主可用性默认采用 **Fail-Open**（存储或配置异常通过 `daming_degraded` 标记上报，绝不拖垮宿主主流程；高敏场景可传 `DamingPlugin(strict=True)` 切换为严格阻断），对代码演化默认采用 **Fail-Closed**（高危系统调用与未授权变更一律拦截）。
+所有 CLI 命令统一输出结构化 JSON，方便人工排查或脚本集成：
+
+| 命令 | 用途 |
+|---|---|
+| `daming-os install --host-dir .` | 在现有宿主目录生成隔离 `.daming/` 状态区、`daming_bootstrap.py` 并执行冒烟自检 |
+| `daming-os init --dir ./.daming` | 初始化独立工作区配置（支持 `generic` / `langgraph` / `openclaw` / `codex` 预设） |
+| `daming-os status --dir ./.daming` | 查看当前工作区清单、后台调度任务状态与最近运行回执 |
+| `daming-os doctor --dir ./.daming` | 执行存储读写、索引完整性与配置漂移健康体检 |
+| `daming-os maintain --dir ./.daming --consolidate` | 手动触发近期记忆回顾与冷温层整合 |
+| `daming-os migrate --dir ./.daming` | 平滑迁移旧版记忆工作区数据结构 |
+| `daming-os approvals --dir ./.daming list / show <id>` | 列出或查看待审批的自愈补丁与演化提案详情 |
+| `daming-os approvals --dir ./.daming issue <id>` | 签发终端一次性 OTP 口令（口令仅回显一次，绝不写入日志） |
+| `daming-os approvals --dir ./.daming approve <id> <otp>` | 凭一次性 OTP 安全放行提案进入冷备部署与上线校验 |
+
+---
+
+## 安全与可用性双向准则
+
+- **对宿主可用性默认 `Fail-Open`**：当磁盘或外部存储偶发抖动时，`DamingPlugin` 自动通过 `daming_degraded` 字段标记降级并放行主流程，绝不拖垮在线业务；强合规环境可传入 `DamingPlugin(strict=True)` 切换为阻断模式。
+- **对代码自演化默认 `Fail-Closed`**：未通过隔离编译、AST 静态安全门禁或缺少有效一次性 OTP 授权的自修改提案一律拦截。
 
 ---
 
 ## 关于作者
 
-作者：**[Dylan.ma](https://github.com/dylanma8232-art)** · [查看主页更多开源工具与实验项目 →](https://github.com/dylanma8232-art?tab=repositories)
+作者：**[Dylan.ma](https://github.com/dylanma8232-art)** · **[返回个人主页查看更多开源项目 →](https://github.com/dylanma8232-art)**
 
-本项目基于 [CC BY-NC-SA 4.0](LICENSE) 协议开源。
+本项目基于 [CC BY-NC-SA 4.0](LICENSE) 协议开源。欢迎提交 Issue 或 PR（见 [CONTRIBUTING.md](CONTRIBUTING.md)）。

@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 setup(
     name="daming-os",
     version="1.5.0",
-    description="A decoupled, standalone Daming OS containing 大明记忆系统 3.0 and 大明成长系统 2.0",
+    description="Zero-core-dependency Memory 3.0 & Self-Healing 2.0 runtime foundation for AI agents",
     author="dylanma8232-art",
     packages=find_packages(),
     install_requires=[],
