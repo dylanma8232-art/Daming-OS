@@ -7,7 +7,7 @@
 <p>
   <a href="README.md"><img alt="简体中文" src="https://img.shields.io/badge/语言-简体中文-2b2927?style=flat-square"></a>
   <a href="README_EN.md"><img alt="English" src="https://img.shields.io/badge/Language-English-c8521b?style=flat-square"></a>
-  <a href="setup.py"><img alt="Version 1.5.0" src="https://img.shields.io/badge/Version-1.5.0-3776ab?style=flat-square"></a>
+  <a href="https://github.com/dylanma8232-art/Daming-OS/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/dylanma8232-art/Daming-OS?display_name=tag&style=flat-square"></a>
   <a href="setup.py"><img alt="Python 3.9+" src="https://img.shields.io/badge/Python-3.9%2B-3776ab?style=flat-square"></a>
   <a href="setup.py"><img alt="Zero Core Dependencies" src="https://img.shields.io/badge/Core_Deps-Zero-2e7d32?style=flat-square"></a>
   <a href="LICENSE"><img alt="License: CC BY-NC-SA 4.0" src="https://img.shields.io/badge/License-CC_BY--NC--SA_4.0-b45309?style=flat-square"></a>
